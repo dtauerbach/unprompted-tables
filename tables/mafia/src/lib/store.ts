@@ -183,8 +183,11 @@ export async function sweep(limit = 25): Promise<void> {
       // Back off only this unchanged scheduling entry, so corrupt oldest
       // matches cannot fill every bounded batch forever. Rules still replay
       // their original deadlines; due is only the maintenance index.
-      await db()`UPDATE open_matches SET due=${new Date(now().getTime() + 60_000)}
-        WHERE match_id=${row.match_id} AND due=${row.due}`;
+      await db().begin(async (tx) => {
+        const retryAt = new Date((await tableNow(tx)).getTime() + 60_000);
+        await tx`UPDATE open_matches SET due=${retryAt}
+          WHERE match_id=${row.match_id} AND due=${row.due}`;
+      });
     }
   }
   await db().begin(async (tx) => {
