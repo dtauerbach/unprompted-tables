@@ -21,3 +21,6 @@ export const SETTINGS = {
   session_seconds: 86_400,
 };
 export const GAME = "mafia";
+
+// Shared by reservation creation and cleanup in this Table only.
+export const QUEUE_LOCK = 7_402_001;

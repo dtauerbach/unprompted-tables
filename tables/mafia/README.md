@@ -96,6 +96,15 @@ notice. Neither is interpreted as commands or HTML. Unpaired surrogates and
 control characters (except tab, LF and CR) are refused before persistence.
 Unexpected route errors are sanitized before logging because database errors
 can carry private event parameters; intentional API errors keep their codes.
+Diagnostics include a route template or maintenance operation, bounded error
+class and SQLSTATE, match id for sweep failures, and a fresh reporting-site stack.
+Raw messages, original stacks, constraint names and SQL fields are omitted: even
+messages and stacks can embed private values. Each failed sweep match rolls back
+independently, is logged, and remains available for investigation. Its maintenance
+entry backs off for 60 seconds so failed matches cannot monopolize bounded
+batches; event deadlines and history stay unchanged. Other matches
+and expired credentials still get processed. Maintenance is opportunistic and
+bounded, not a substitute for monitoring or repair of corrupt history.
 
 Early night closure remains part of the advertised rules. A public phase-change
 timestamp therefore exposes when the last required action completed, though

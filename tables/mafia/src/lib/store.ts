@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { sideResultSchema } from "@unprompted-tables/game";
 import { ApiError, db, isReadOnly, type Tx } from "@unprompted-tables/server";
 import { matchStartTime, now, tableNow } from "./clock";
+import { logFailure } from "./diagnostics";
 import {
   advance,
   apply,
@@ -12,7 +13,7 @@ import {
   start,
   view,
 } from "./match";
-import { SETTINGS } from "./settings";
+import { QUEUE_LOCK, SETTINGS } from "./settings";
 
 // Matches in the database: their events, their results, and which are still
 // open. The rules of a match are in match.ts; this file runs each match's
@@ -167,18 +168,28 @@ export async function startMatch(tx: Tx, players: string[]): Promise<string> {
 export async function sweep(limit = 25): Promise<void> {
   if (isReadOnly()) return;
   const stale = await db().begin(
-    async (tx) => tx<{ match_id: string }[]>`
-    SELECT match_id FROM open_matches WHERE due <= ${await tableNow(tx)}
+    async (tx) => tx<{ match_id: string; due: Date }[]>`
+    SELECT match_id, due FROM open_matches WHERE due <= ${await tableNow(tx)}
     ORDER BY due, match_id LIMIT ${limit}`,
   );
-  for (const row of stale)
-    await withMatch(row.match_id, async () => ({
-      events: [],
-      value: undefined,
-    }));
+  for (const row of stale) {
+    try {
+      await withMatch(row.match_id, async () => ({
+        events: [],
+        value: undefined,
+      }));
+    } catch (error) {
+      logFailure(error, "sweep_match", row.match_id);
+      // Back off only this unchanged scheduling entry, so corrupt oldest
+      // matches cannot fill every bounded batch forever. Rules still replay
+      // their original deadlines; due is only the maintenance index.
+      await db()`UPDATE open_matches SET due=${new Date(now().getTime() + 60_000)}
+        WHERE match_id=${row.match_id} AND due=${row.due}`;
+    }
+  }
   await db().begin(async (tx) => {
     // Serialize reservation removal with matchmaking's selection.
-    await tx`SELECT pg_advisory_xact_lock(7402001)`;
+    await tx`SELECT pg_advisory_xact_lock(${QUEUE_LOCK})`;
     await tx`DELETE FROM queue WHERE expires_at <= ${now()}`;
   });
   await db()`DELETE FROM sessions WHERE expires_at <= ${now()}`;

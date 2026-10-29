@@ -1,7 +1,7 @@
 import { consume, db } from "@unprompted-tables/server";
 import { now } from "./clock";
 import { queueRules } from "./limits";
-import { SETTINGS } from "./settings";
+import { QUEUE_LOCK, SETTINGS } from "./settings";
 import { openMatchOf, startMatch, withMatch } from "./store";
 
 // Pairing: a player joins the queue and is matched with whoever has waited
@@ -12,9 +12,6 @@ export type Standing =
   | { status: "playing"; match: string }
   | { status: "waiting"; until: Date }
   | { status: "idle" };
-
-// One queue at a time, so concurrent joins cannot claim the same seats.
-const QUEUE_LOCK = 7_402_001;
 
 // A match whose time ran out while nobody looked still counts as open until
 // its clock is brought up to date, so do that first.

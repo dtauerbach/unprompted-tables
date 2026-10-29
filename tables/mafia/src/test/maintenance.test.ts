@@ -140,7 +140,7 @@ it("counts transaction time before a deadline-crossing lock wait", async () => {
       {
         players: 7,
         reveal_on_death: true,
-        talk_seconds: 1,
+        talk_seconds: 2,
         vote_seconds: 60,
         max_days: 20,
       },
@@ -163,7 +163,7 @@ it("counts transaction time before a deadline-crossing lock wait", async () => {
         await db()`SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%SELECT id FROM matches%'`;
       expect(rows.length).toBeGreaterThan(0);
     });
-    await tx`SELECT pg_sleep(1.1)`;
+    await tx`SELECT pg_sleep(2.1)`;
   });
   expect((await pending)?.status).toBe(200);
   expect(
@@ -220,4 +220,36 @@ it("the database rejects duplicate seats", async () => {
   await expect(
     db()`INSERT INTO matches(id,players) VALUES('m_aaaaaaaaaaaa',${Array(7).fill("alice")})`,
   ).rejects.toThrow();
+});
+
+it("isolates broken replay while sweeping healthy matches and expired credentials", async () => {
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  const broken = "m_bbbbbbbbbbbb";
+  await db()`INSERT INTO matches(id,players) VALUES(${broken},${players})`;
+  await db()`INSERT INTO open_matches(match_id,players,due) VALUES(${broken},${players},${now()})`;
+  const healthy = await db().begin((tx) => startMatch(tx, players));
+  await sessionFor("expired");
+  await db()`INSERT INTO queue(player,expires_at) VALUES('expired',${now()})`;
+  moveClock(86_400_001);
+  await sweep(1);
+  expect(
+    await db()`SELECT * FROM open_matches WHERE match_id=${healthy}`,
+  ).toHaveLength(1);
+  await sweep(1);
+  expect((await call(describe)).status).toBe(200);
+  expect(
+    await db()`SELECT * FROM open_matches WHERE match_id=${healthy}`,
+  ).toHaveLength(0);
+  expect(
+    await db()`SELECT * FROM open_matches WHERE match_id=${broken}`,
+  ).toHaveLength(1);
+  expect(await db()`SELECT * FROM sessions`).toHaveLength(0);
+  expect(await db()`SELECT * FROM queue`).toHaveLength(0);
+  const diagnostic = JSON.parse(logged.mock.calls[0]?.[0]);
+  expect(diagnostic).toMatchObject({
+    event: "mafia_failure",
+    operation: "sweep_match",
+    match: broken,
+    name: "Error",
+  });
 });
