@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit && npm run typecheck -w rps-table",
+    "typecheck": "tsc --noEmit && npm run typecheck -w rps-table && npm run typecheck -w mafia-table",
     "lint": "biome check .",
     "test": "npm run test --workspaces --if-present",
     "check": "npm run typecheck && biome check . && npm test"

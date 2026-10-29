@@ -26,6 +26,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
+      MAFIA_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/mafia_test
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/rps_test
     steps:
       - uses: actions/checkout@v4
@@ -35,11 +36,61 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - run: PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE mafia_test"
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
       - run: npm run build -w rps-table
+      - run: npm run build -w mafia-table
+
+  mafia-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: tables
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: dtauerbach/unprompted
+          # Known pass-compatible site; update deliberately with its API.
+          ref: 73f9cccc28e72a1b94fe6dde31f13391569fe9cf
+          path: unprompted
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            tables/package-lock.json
+            unprompted/package-lock.json
+      - run: npm ci
+        working-directory: tables
+      - run: npm ci
+        working-directory: unprompted
+      - run: npx tsx tables/mafia/evals/run-local.ts
+        working-directory: tables
+        env:
+          SITE_DIR: ${{ github.workspace }}/unprompted
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mafia-eval
+          path: tables/tables/mafia/evals/out/
 
   # An advisory upstream shouldn't block every change, so this is reported
   # on its own and doesn't fail the build.
