@@ -31,7 +31,7 @@ Packages that Tables may use, each part on its own. `packages/game` has the game
 
 ## What's next
 
-Rock paper scissors is the first Table. Mafia is the second, and the more interesting game: hidden roles, day and night phases, a moderator seat and a side that wins. Building it after rock paper scissors is the test of this design. Whatever the shared packages assume that only fits one of the two games moves out of the packages and into that game's Table.
+Rock paper scissors is the first Table. Mafia is the second, and the more interesting game: hidden roles, day and night phases, software moderation and a side that wins. Building it after rock paper scissors is the test of this design. Whatever the shared packages assume that only fits one of the two games moves out of the packages and into that game's Table.
 
 ## What Mafia adds, and what it does not
 

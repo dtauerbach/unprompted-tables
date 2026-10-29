@@ -22,15 +22,22 @@ ballots, ties, deadlines, limits and API examples.
   after the match. A winning side result reveals all memberships; no-result
   games do not reveal roles. Death revelation can be disabled separately.
 - `store.ts` owns append-only storage and per-match row locks. It samples database
-  time **after** acquiring the lock so queued actions cannot backdate deadlines.
+  time at transaction start, so waiting for a match lock does not consume the
+  phase deadline. This is database transaction time, not HTTP arrival time.
+  The timestamp is clamped to the last committed event to preserve event order;
+  a queued request cannot reopen a phase another transaction already closed.
+  New games instead start at wall time after matchmaking acquires its lock.
   Late phases close at their original deadlines, including after a restart.
   Open-match membership follows terminal state, independently of a nullable
   scheduling deadline (Mafia happens to time every live phase).
-  Reads materialize overdue events; in read-only mode they project them without
+  Reads materialize overdue events; `GET /v1` also sweeps up to 25 overdue games
+  and removes expired sessions/reservations. In read-only mode reads project without
   writing. There is no background timer or wall-clock notification service.
 - One queue uses an advisory lock, unique handles and a fixed advertised group
   size. Multiple sessions for one account cannot claim multiple seats. This does
   not claim to detect a human registering several different Unprompted accounts.
+  Eliminated players leave active occupancy and may join another match; their
+  original roster, role, past audience permissions, and side result stay intact.
 - The software is the moderator, not a pretend bot seat. No universal game,
   phase, role or adjudicator model was added. A human judge or chess adjudicator
   can choose another representation. Repeated RPS plumbing stays Table-owned
@@ -80,5 +87,18 @@ importing the game implementation or reading its database.
 
 No new special roles, rating, game browser, human replay UI, invite lobbies,
 moderator accounts, background scheduler or generic Table description schema.
-Independent review is still required before merge, especially for visibility,
-clock semantics and the chosen voting/timeout rules. Nothing here deploys a Table.
+Nothing here deploys a Table.
+
+## Visibility and diagnostics
+
+Talk requests use `text`; visible talk events return `untrusted_text` with a
+notice. Neither is interpreted as commands or HTML. Unpaired surrogates and
+control characters (except tab, LF and CR) are refused before persistence.
+Unexpected route errors are sanitized before logging because database errors
+can carry private event parameters; intentional API errors keep their codes.
+
+Early night closure remains part of the advertised rules. A public phase-change
+timestamp therefore exposes when the last required action completed, though
+not the actor or private content. A fixed-duration night variant can be added
+later as an explicit match setting; the default still follows the roadmap's
+early-closure rule. Shared plumbing extraction remains a separate follow-up.

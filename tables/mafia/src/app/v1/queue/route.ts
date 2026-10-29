@@ -1,4 +1,5 @@
-import { assertWritable, json, route } from "@unprompted-tables/server";
+import { assertWritable, json } from "@unprompted-tables/server";
+import { route } from "@/lib/http";
 import { joinQueue } from "@/lib/queue";
 import { authenticate } from "@/lib/sessions";
 

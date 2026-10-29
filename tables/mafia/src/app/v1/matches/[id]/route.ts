@@ -1,4 +1,5 @@
-import { bearerToken, json, route } from "@unprompted-tables/server";
+import { bearerToken, json } from "@unprompted-tables/server";
+import { route } from "@/lib/http";
 import { authenticate } from "@/lib/sessions";
 import { readMatch } from "@/lib/store";
 export const GET = route(

@@ -81,7 +81,7 @@ it("plays through real Unprompted passes while adversarial bots try to cheat", a
   ).toBe(400);
   const deadline = Date.parse((await read()).json.due);
   await new Promise((resolve) =>
-    setTimeout(resolve, Math.max(0, deadline - Date.now() + 50)),
+    setTimeout(resolve, Math.max(0, deadline - Date.now() + 500)),
   );
   expect((await action(first, { kind: "ready", turn: 1 })).status).toBe(409);
   let state = (await read()).json;

@@ -80,6 +80,76 @@ describe("software moderator", () => {
     ).toThrow("talk limit");
   });
 
+  it("reveals configured death sides, excludes dead mafia from later nights, and rejects dead or absent targets", () => {
+    const roster = [...players, "frank", "grace"];
+    const log = start(roster, { ...rules, players: 7 }, at);
+    let state = replay("test", log);
+    const add = (events: MatchEvent[]) => {
+      log.push(...events);
+      state = events.reduce(apply, state);
+    };
+    const mafia = roster.filter((p) => state.roles[p] === "mafia");
+    const victim = mafia[0] as string;
+    for (const p of roster) add(act(state, p, { kind: "ready", turn: 1 }, at));
+    for (const p of roster)
+      add(
+        act(
+          state,
+          p,
+          { kind: "vote", turn: 2, target: p === victim ? null : victim },
+          at,
+        ),
+      );
+    expect(log.find((e) => e.body.kind === "death")?.body).toMatchObject({
+      player: victim,
+      side: "mafia",
+    });
+    const survivor = mafia[1] as string;
+    add(
+      act(
+        state,
+        survivor,
+        { kind: "talk", turn: 3, text: "new private strategy" },
+        at,
+      ),
+    );
+    expect(JSON.stringify(view(state, log, victim))).not.toContain(
+      "new private strategy",
+    );
+    expect(JSON.stringify(view(state, log, survivor))).toContain(
+      "untrusted_text",
+    );
+    add(act(state, survivor, { kind: "ready", turn: 3 }, at));
+    for (const target of [victim, "absent"])
+      expect(() =>
+        act(state, survivor, { kind: "vote", turn: 4, target }, at),
+      ).toThrow("invalid target");
+  });
+  it("a tied night vote eliminates nobody", () => {
+    const roster = [...players, "frank", "grace"];
+    let state = replay("test", start(roster, { ...rules, players: 7 }, at));
+    const add = (events: MatchEvent[]) => {
+      state = events.reduce(apply, state);
+    };
+    for (const p of roster) add(act(state, p, { kind: "ready", turn: 1 }, at));
+    for (const p of roster)
+      add(act(state, p, { kind: "vote", turn: 2, target: null }, at));
+    const mafia = roster.filter((p) => state.roles[p] === "mafia");
+    const village = roster.filter((p) => state.roles[p] === "village");
+    for (const p of mafia) add(act(state, p, { kind: "ready", turn: 3 }, at));
+    for (const [i, p] of mafia.entries())
+      add(
+        act(
+          state,
+          p,
+          { kind: "vote", turn: 4, target: village[i] as string },
+          at,
+        ),
+      );
+    expect(state.alive).toEqual(roster);
+    expect(state.phase).toBe("day_talk");
+  });
+
   it("ends immediately on village victory and includes dead teammates", () => {
     const g = game();
     const mafia = players.find((p) => g.s.roles[p] === "mafia") as string;

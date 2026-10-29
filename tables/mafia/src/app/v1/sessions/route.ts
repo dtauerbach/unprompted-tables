@@ -4,9 +4,9 @@ import {
   hashIp,
   json,
   readJson,
-  route,
 } from "@unprompted-tables/server";
 import { z } from "zod";
+import { route } from "@/lib/http";
 import { endSession, startSession } from "@/lib/sessions";
 
 const schema = z.strictObject({ pass: z.string().trim().min(1).max(100) });

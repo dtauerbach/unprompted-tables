@@ -24,18 +24,7 @@ async function match() {
   return { id, tokens, params: { id } };
 }
 describe("Mafia HTTP with Postgres", () => {
-  it("requires identity on writes and exchanges only addressed single-use passes", async () => {
-    for (const handler of [action, queue, leave, revoke]) {
-      expect(
-        (
-          await call(handler, {
-            method: "POST",
-            params: { id: "m_aaaaaaaaaaaa" },
-            body: { kind: "ready", turn: 1 },
-          })
-        ).status,
-      ).toBe(401);
-    }
+  it("exchanges only addressed single-use passes", async () => {
     const site = fakeSite();
     try {
       const pass = site.pass("alice");

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { sideResultSchema } from "@unprompted-tables/game";
 import { ApiError, db, isReadOnly, type Tx } from "@unprompted-tables/server";
-import { tableNow } from "./clock";
+import { matchStartTime, now, tableNow } from "./clock";
 import {
   advance,
   apply,
@@ -47,8 +47,8 @@ async function append(
   if (state.phase !== "over")
     await tx`
       INSERT INTO open_matches (match_id, players, due)
-      VALUES (${id}, ${state.players}, ${next})
-      ON CONFLICT (match_id) DO UPDATE SET due = EXCLUDED.due`;
+      VALUES (${id}, ${state.alive}, ${next})
+      ON CONFLICT (match_id) DO UPDATE SET due = EXCLUDED.due, players = EXCLUDED.players`;
   else await tx`DELETE FROM open_matches WHERE match_id = ${id}`;
   const end = events.find((e) => e.body.kind === "end");
   if (end && state.result) {
@@ -66,7 +66,7 @@ function fold(state: MatchState, events: MatchEvent[]): MatchState {
 // match's row lock, and stores the events the clock and fn add. If fn
 // refuses, nothing is stored: the clock's events follow from deadlines, so
 // the next look at the match makes the same ones again. fn gets the time
-// after acquiring the row lock (see tableNow), for the events it adds.
+// at transaction start, bounded by the last recorded event, for new events.
 export async function withMatch<T>(
   id: string,
   fn: (
@@ -80,8 +80,13 @@ export async function withMatch<T>(
   const value = await db().begin(async (tx) => {
     const [row] = await tx`SELECT id FROM matches WHERE id = ${id} FOR UPDATE`;
     if (!row) throw noSuchMatch(id);
-    const at = await tableNow(tx);
+    const arrived = await tableNow(tx);
     const stored = await loadEvents(tx, id);
+    // Lock acquisition order need not match transaction arrival order. Never
+    // timestamp an action before an event that already committed.
+    const at = new Date(
+      Math.max(arrived.getTime(), Date.parse(stored.at(-1)?.body.at ?? "")),
+    );
     const late = advance(replay(id, stored), at);
     const state = fold(replay(id, stored), late);
     const out = await fn(state, [...stored, ...late], tx, at);
@@ -151,9 +156,30 @@ export async function startMatch(tx: Tx, players: string[]): Promise<string> {
       vote_seconds,
       max_days,
     },
-    await tableNow(tx),
+    await matchStartTime(tx),
   );
   await tx`INSERT INTO matches (id, players) VALUES (${id}, ${players})`;
   await append(tx, id, 0, events, replay(id, events));
   return id;
+}
+
+// Bounded opportunistic maintenance; no public state or history is returned.
+export async function sweep(limit = 25): Promise<void> {
+  if (isReadOnly()) return;
+  const stale = await db().begin(
+    async (tx) => tx<{ match_id: string }[]>`
+    SELECT match_id FROM open_matches WHERE due <= ${await tableNow(tx)}
+    ORDER BY due, match_id LIMIT ${limit}`,
+  );
+  for (const row of stale)
+    await withMatch(row.match_id, async () => ({
+      events: [],
+      value: undefined,
+    }));
+  await db().begin(async (tx) => {
+    // Serialize reservation removal with matchmaking's selection.
+    await tx`SELECT pg_advisory_xact_lock(7402001)`;
+    await tx`DELETE FROM queue WHERE expires_at <= ${now()}`;
+  });
+  await db()`DELETE FROM sessions WHERE expires_at <= ${now()}`;
 }
