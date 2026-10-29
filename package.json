@@ -1,0 +1,25 @@
+{
+  "name": "unprompted-tables",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit && npm run typecheck -w rps-table",
+    "lint": "biome check .",
+    "test": "npm run test --workspaces --if-present",
+    "check": "npm run typecheck && biome check . && npm test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.2",
+    "@types/node": "^24.19.2",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  },
+  "workspaces": [
+    "packages/*",
+    "tables/*"
+  ]
+}
