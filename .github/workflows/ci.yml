@@ -14,6 +14,8 @@ permissions:
 
 jobs:
   check:
+    # The nightly run is only for the Tables against the site's main.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -114,10 +116,12 @@ jobs:
           name: ${{ matrix.table }}-eval-site-${{ matrix.site == 'main' && 'main' || 'pinned' }}
           path: tables/tables/${{ matrix.table }}/evals/out/
           if-no-files-found: ignore
+          retention-days: 14
 
   # An advisory upstream shouldn't block every change, so this is reported
   # on its own and doesn't fail the build.
   audit:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     continue-on-error: true
