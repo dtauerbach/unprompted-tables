@@ -202,6 +202,10 @@ describe("the event log", () => {
       db()`INSERT INTO events (match_id, seq, kind, body)
            VALUES (${id}, 1, 'end', ${db().json({ kind: "end" })})`,
     ).rejects.toThrow();
+    await expect(
+      db()`INSERT INTO events (match_id, seq, kind, body)
+           VALUES (${id}, 1, 'end', ${db().json({ kind: "end", at: null })})`,
+    ).rejects.toThrow();
     expect(await kinds(id)).toEqual(["start"]);
   });
 });

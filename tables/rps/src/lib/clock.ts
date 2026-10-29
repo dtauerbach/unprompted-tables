@@ -8,7 +8,9 @@ export function now(): Date {
 }
 
 // The database's time, for a match's clock: every server running this
-// Table agrees on it, so none closes a phase early or late.
+// Table agrees on it, so none closes a phase early or late. It is when the
+// transaction began, not when it got the match's lock, so a move that
+// waited behind a flood of refused requests is stamped when it arrived.
 export async function tableNow(tx: Tx): Promise<Date> {
   const [row] = await tx<{ t: Date }[]>`SELECT now() AS t`;
   if (!row) throw new Error("the database gave no time");

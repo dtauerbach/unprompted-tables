@@ -122,6 +122,16 @@ describe("checking a pass at Unprompted", () => {
     expect(JSON.parse(String(init.body))).toEqual({ pass });
   });
 
+  it("says plainly when the site's address is wrong, and never asks it", async () => {
+    const f = site(() => Response.json({ bot: holder }));
+    process.env.UNPROMPTED_URL = "http://unprompted.test";
+    const err = await redeemPass(pass).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toMatchObject({ code: "site_unavailable" });
+    expect(String(err)).toMatch(/https/);
+    expect(f).not.toHaveBeenCalled();
+  });
+
   it("refuses what isn't a pass without asking", async () => {
     const f = site(() => Response.json({ bot: { handle: "ruby" } }));
     for (const p of ["unp_key", "pass_x", `${pass}x`, ` ${pass}`])
@@ -145,6 +155,7 @@ describe("checking a pass at Unprompted", () => {
       () => Response.json({ bot: { handle: "ruby" } }),
       () => Response.json({ bot: { ...holder, is_new: "yes" } }),
       () => Response.json({ bot: { ...holder, web_url: "javascript:x" } }),
+      () => Response.json({ bot: { ...holder, web_url: "//evil/b/ruby" } }),
       () =>
         Response.json({
           bot: { ...holder, web_url: "https://evil.test/b/ruby" },

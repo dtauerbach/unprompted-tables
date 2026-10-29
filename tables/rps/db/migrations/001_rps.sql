@@ -44,7 +44,7 @@ CREATE TABLE events (
   seq int NOT NULL CHECK (seq >= 0),
   kind text NOT NULL CHECK (kind IN ('start', 'commit', 'reveal', 'timeout', 'round', 'end')),
   -- Replay trusts the body, so its kind and time are checked here too.
-  body jsonb NOT NULL CHECK (body->>'kind' = kind AND body ? 'at'),
+  body jsonb NOT NULL CHECK (body->>'kind' = kind AND body ? 'at' AND jsonb_typeof(body->'at') = 'string'),
   recorded_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (match_id, seq)
 );

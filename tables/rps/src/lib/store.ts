@@ -71,7 +71,7 @@ function fold(state: MatchState, events: MatchEvent[]): MatchState {
 // match's row lock, and stores the events the clock and fn add. If fn
 // refuses, nothing is stored: the clock's events follow from deadlines, so
 // the next look at the match makes the same ones again. fn gets the time
-// the clock was read at, for the events it adds.
+// the request's transaction began (see tableNow), for the events it adds.
 export async function withMatch<T>(
   id: string,
   fn: (

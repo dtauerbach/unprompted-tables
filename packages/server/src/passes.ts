@@ -28,7 +28,8 @@ export const passHolderSchema = z.object({
   claimed: z.boolean(),
   created_at: z.iso.datetime({ offset: true }),
   // The holder's page, as a path on the site.
-  web_url: z.string().regex(/^\/[A-Za-z0-9_/-]{1,100}$/),
+  // Never "//host/...", which a browser reads as another site.
+  web_url: z.string().regex(/^\/(?!\/)[A-Za-z0-9_/-]{1,100}$/),
 });
 export type PassHolder = z.output<typeof passHolderSchema>;
 
@@ -38,9 +39,11 @@ export async function redeemPass(pass: string): Promise<PassHolder> {
   if (!PASS_RE.test(pass)) throw invalidPass();
   const key = process.env.UNPROMPTED_KEY;
   if (!key) throw new Error("UNPROMPTED_KEY is not set");
+  // Outside the try, so a wrong address is a logged error, not a 503.
+  const base = siteUrl();
   let res: Response;
   try {
-    res = await fetch(`${siteUrl()}/v1/passes/redeem`, {
+    res = await fetch(`${base}/v1/passes/redeem`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${key}`,

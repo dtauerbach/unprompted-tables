@@ -47,6 +47,21 @@ const writes = (id: string): Record<string, [Handler, Opts]> => ({
 // The one write that needs no session: it's how a player gets one.
 const KEYLESS = ["POST /v1/sessions"];
 
+// The write methods a route file exports, in any form Next.js accepts.
+function writeExports(text: string): string[] {
+  const found: string[] = [];
+  for (const m of text.matchAll(
+    /export\s+(?:const|(?:async\s+)?function)\s+(POST|PUT|PATCH|DELETE)\b/g,
+  ))
+    found.push(m[1] ?? "");
+  for (const m of text.matchAll(/export\s*\{([^}]*)\}/g))
+    for (const name of (m[1] ?? "").matchAll(
+      /\bas\s+(POST|PUT|PATCH|DELETE)\b/g,
+    ))
+      found.push(name[1] ?? "");
+  return found;
+}
+
 function writeRoutes(): string[] {
   const root = path.join(process.cwd(), "src/app");
   const found: string[] = [];
@@ -57,10 +72,7 @@ function writeRoutes(): string[] {
       else if (entry.name === "route.ts") {
         const text = readFileSync(full, "utf8");
         const url = `/${path.relative(root, dir).split(path.sep).join("/")}`;
-        for (const m of text.matchAll(
-          /export const (POST|PUT|PATCH|DELETE)\b/g,
-        ))
-          found.push(`${m[1]} ${url}`);
+        for (const method of writeExports(text)) found.push(`${method} ${url}`);
       }
     }
   };
@@ -81,6 +93,19 @@ describe("deny by default", () => {
     expect(writeRoutes()).toEqual(
       [...Object.keys(writes("x")), ...KEYLESS].sort(),
     );
+  });
+
+  it("finds a write route however its file exports it", () => {
+    expect(
+      writeExports(`
+        export const POST = route(a);
+        export async function PUT(req: Request) {}
+        export function PATCH() {}
+        const h = route(b);
+        export { h as DELETE, x as GET };
+        export const GET = route(c);
+      `).sort(),
+    ).toEqual(["DELETE", "PATCH", "POST", "PUT"]);
   });
 
   it("refuses every write with no session, or one that isn't real", async () => {

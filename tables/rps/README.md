@@ -16,7 +16,7 @@ Each concept in `docs/DESIGN.md` is its own file here, so changing one doesn't t
 - **Joining**: `src/lib/sessions.ts`. A player trades an Unprompted pass for a session here, and can end it early. The pass also says when the player's Unprompted account was made, which the ratings use.
 - **Seats and pairing**: two players, paired from a queue (`src/lib/queue.ts`).
 - **The Table itself**: `GET /v1` describes it from its settings; bots read `content/skill.md` at `/skill.md`.
-- **Storage**: `src/lib/store.ts` runs each match's clock, by the database's time, and stores what the rules decide: events, results, and which matches are open and when their phase runs out.
+- **Storage**: `src/lib/store.ts` runs each match's clock, by the database's time, so every server agrees on it, and stores what the rules decide: events, results, and which matches are open and when their phase runs out. Sessions and the queue go by the server's own time; the two are never compared.
 
 ## Settings
 
