@@ -21,14 +21,45 @@ Games differ too much to share one shape. So nothing here says what every game i
 
 - Rock paper scissors: rules in code, two seats, simultaneous moves as commit then reveal (private events made public), a phase clock, software enforcement, places, Elo.
 - Chess with one adjudicator: no rules in code, an adjudicator seat keeps the board and rules on each move, a bank clock, rulings as events.
-- Mafia: hidden roles (private events), day and night phases, a moderator seat, a result that names a side rather than places.
+- Mafia: hidden roles (private events), day and night phases, software moderation (a seat-based moderator is a possible different Table), a result that names a side rather than places.
 - A judged debate: free-text events, a judge seat, a result that's a verdict with reasons, maybe no rating.
 - A daily puzzle: one seat per player, no opponents, a once-a-day schedule, scores.
 
 ## What's shared code
 
-Packages that Tables may use, each part on its own. `packages/game` has the game parts: sealed moves, clock templates, a place result and Elo. `packages/server` has the plumbing: errors, a database, rate limits, migrations, tokens and checking a pass. Sessions themselves are each Table's. A Table takes what fits and ignores the rest; an event log with private events comes when a game needs one. Each Table lives in this repo under `tables/`, or in a repo of its own.
+Packages that Tables may use, each part on its own. `packages/game` has the game parts: sealed moves, clock templates, place and side results, a seat-visible event envelope, and Elo. `packages/server` has the plumbing: errors, a database, rate limits, migrations, tokens and checking a pass. Sessions themselves are each Table's. A Table takes what fits and ignores the rest; Mafia uses the event envelope to filter its own durable append-only log; the helper knows no phases, roles, or moderator. Each Table lives in this repo under `tables/`, or in a repo of its own.
 
 ## What's next
 
 Rock paper scissors is the first Table. Mafia is the second, and the more interesting game: hidden roles, day and night phases, a moderator seat and a side that wins. Building it after rock paper scissors is the test of this design. Whatever the shared packages assume that only fits one of the two games moves out of the packages and into that game's Table.
+
+## What Mafia adds, and what it does not
+
+Mafia exercises two optional shared values: `VisibleEvent<T, Seat>` and
+`SideResult`. The former holds an arbitrary body and either a public audience or
+an immutable list of recipients; its reader returns only visible bodies in order.
+The latter names a winning side and membership without translating teams into
+places or feeding them to Elo. RPS's existing APIs and results are unchanged.
+Neither helper is a required Table interface.
+
+Mafia owns role dealing, its four phases, legal actors, talk caps, ballots,
+timeouts, tie policy, deaths, victory, views, queue, persistence and description.
+Its software moderator is an authority, not a fictitious authenticated player.
+We have not defined a universal moderator seat or enforcement registry: a chess
+adjudicator or debate judge may need authenticated seats and different rulings.
+A daily puzzle need not have opponents, phases, private events or a winning side.
+A future game can replace all of these pieces without implementing Mafia's shape.
+
+The two Tables intentionally repeat some sessions/queue/store plumbing. Moving
+that into a generic engine now would entangle identity, matchmaking, transitions,
+visibility and results. Extract further helpers only when another concrete use
+shows the boundary. Event visibility is not a complete authorization system:
+the Table must authenticate the reader, assign audiences on the server, and
+project its internal state safely. It must not serialize an omniscient replay.
+
+Mafia pins rule parameters in its start event; replays do not consult today's
+Table configuration. Open-match membership follows its terminal rule state,
+not whether it has a deadline. Its scheduling column is nullable even though
+all current Mafia phases are timed. Neither decision turns timing or completion
+into a universal Table requirement. Future incompatible reducer changes will
+need explicit versioning/migration of the recorded event protocol.

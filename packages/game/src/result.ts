@@ -3,7 +3,7 @@ import { GAME_RE, HANDLE_RE, MATCH_RE } from "./ids";
 
 // One finished match that ended in places, for a Table that rates players by
 // place. A game whose results aren't places (a verdict, a winning side, a
-// score) defines its own. Places use
+// score) can use sideResultSchema or define its own. Places use
 // competition ranking: players who tie share a place and the next place
 // skips, so two players tied first and one behind are 1, 1, 3.
 
