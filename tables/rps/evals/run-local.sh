@@ -1,14 +1,20 @@
 #!/bin/bash
 # Runs the Table's evals against a local Unprompted and a local Table, each
 # with a fresh database. SITE_DIR is a checkout of the site with the passes
-# change. Needs local Postgres with a postgres superuser.
+# change. Needs a local Postgres superuser: PG_ADMIN_URL, by default the
+# postgres user with password postgres, as CI's Postgres service has it.
 set -euo pipefail
 SITE_DIR=${SITE_DIR:?set SITE_DIR to an Unprompted checkout}
 TABLE_DIR=$(cd "$(dirname "$0")/.." && pwd)
 SITE_DB=postgres://postgres:postgres@localhost:5432/unprompted_tables_eval_test
 TABLE_DB=postgres://postgres:postgres@localhost:5432/rps_eval_test
+PG_ADMIN_URL=${PG_ADMIN_URL:-postgres://postgres:postgres@localhost:5432/postgres}
+case "$PG_ADMIN_URL" in
+  postgres://*@localhost:*|postgres://*@127.0.0.1:*) ;;
+  *) echo "PG_ADMIN_URL must be a local Postgres." >&2; exit 1 ;;
+esac
 for db in unprompted_tables_eval_test rps_eval_test; do
-  su postgres -c "psql -q -c 'DROP DATABASE IF EXISTS $db' -c 'CREATE DATABASE $db'"
+  psql "$PG_ADMIN_URL" -q -c "DROP DATABASE IF EXISTS $db" -c "CREATE DATABASE $db"
 done
 LOGS=${LOGS:-/tmp/rps-eval}
 mkdir -p "$LOGS"

@@ -4,6 +4,10 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Nightly, so a change on the site's main that breaks a Table shows up here
+  # even when nothing in this repo changed. 07:40 UTC, night in New York.
+  schedule:
+    - cron: "40 7 * * *"
 
 permissions:
   contents: read
@@ -44,9 +48,21 @@ jobs:
       - run: npm run build -w rps-table
       - run: npm run build -w mafia-table
 
-  mafia-eval:
+  # Each Table plays against a real local Unprompted, twice: at a site commit
+  # known to speak the pass format (docs/GAMES.md in the site repo), which
+  # must pass, and at the site's main, which is advisory so a site change
+  # can't block this repo but shows up red here the day it lands.
+  table-eval:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    continue-on-error: ${{ matrix.site == 'main' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        table: [rps, mafia]
+        # Known pass-compatible site; update deliberately with its API.
+        site: [73f9cccc28e72a1b94fe6dde31f13391569fe9cf, main]
+    name: ${{ matrix.table }} eval (site ${{ matrix.site == 'main' && 'main' || 'pinned' }})
     services:
       postgres:
         image: postgres:16
@@ -67,8 +83,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: dtauerbach/unprompted
-          # Known pass-compatible site; update deliberately with its API.
-          ref: 73f9cccc28e72a1b94fe6dde31f13391569fe9cf
+          ref: ${{ matrix.site }}
           path: unprompted
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -82,15 +97,23 @@ jobs:
         working-directory: tables
       - run: npm ci
         working-directory: unprompted
-      - run: npx tsx tables/mafia/evals/run-local.ts
+      - if: matrix.table == 'mafia'
+        run: npx tsx tables/mafia/evals/run-local.ts
         working-directory: tables
         env:
           SITE_DIR: ${{ github.workspace }}/unprompted
+      - if: matrix.table == 'rps'
+        run: ./evals/run-local.sh
+        working-directory: tables/tables/rps
+        env:
+          SITE_DIR: ${{ github.workspace }}/unprompted
+          LOGS: ${{ github.workspace }}/tables/tables/rps/evals/out
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mafia-eval
-          path: tables/tables/mafia/evals/out/
+          name: ${{ matrix.table }}-eval-site-${{ matrix.site == 'main' && 'main' || 'pinned' }}
+          path: tables/tables/${{ matrix.table }}/evals/out/
+          if-no-files-found: ignore
 
   # An advisory upstream shouldn't block every change, so this is reported
   # on its own and doesn't fail the build.
