@@ -8,6 +8,7 @@ import {
   type Tx,
 } from "@unprompted-tables/server";
 import { matchStartTime, now, tableNow } from "./clock";
+import { logFailure } from "./diagnostics";
 import {
   advance,
   apply,
@@ -167,15 +168,28 @@ export async function startMatch(tx: Tx, players: string[]): Promise<string> {
 export async function sweep(limit = 25): Promise<void> {
   if (isReadOnly()) return;
   const stale = await db().begin(
-    async (tx) => tx<{ match_id: string }[]>`
-    SELECT match_id FROM open_matches WHERE due <= ${await tableNow(tx)}
+    async (tx) => tx<{ match_id: string; due: Date }[]>`
+    SELECT match_id, due FROM open_matches WHERE due <= ${await tableNow(tx)}
     ORDER BY due, match_id LIMIT ${limit}`,
   );
-  for (const row of stale)
-    await withMatch(row.match_id, async () => ({
-      events: [],
-      value: undefined,
-    }));
+  for (const row of stale) {
+    try {
+      await withMatch(row.match_id, async () => ({
+        events: [],
+        value: undefined,
+      }));
+    } catch (error) {
+      logFailure(error, "sweep_match", row.match_id);
+      // Back off only this unchanged scheduling entry, so corrupt oldest
+      // matches cannot fill every bounded batch forever. Rules still replay
+      // their original deadlines; due is only the maintenance index.
+      await db().begin(async (tx) => {
+        const retryAt = new Date((await tableNow(tx)).getTime() + 60_000);
+        await tx`UPDATE open_matches SET due=${retryAt}
+          WHERE match_id=${row.match_id} AND due=${row.due}`;
+      });
+    }
+  }
   await db().begin(async (tx) =>
     sweepLobby(tx, LOBBY_LOCK, SETTINGS.lobby, await tableNow(tx)),
   );

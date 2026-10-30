@@ -222,8 +222,12 @@ it("redacts unexpected internal errors before the shared logger", async () => {
       parameters: ["secret roles"],
     });
   });
-  expect((await call(handler)).status).toBe(500);
+  expect((await call(handler, { path: "/v1" })).status).toBe(500);
   expect(logged).toHaveBeenCalled();
+  expect(JSON.parse(logged.mock.calls[0]?.[0])).toMatchObject({
+    operation: "/v1",
+    name: "Error",
+  });
   expect(String(logged.mock.calls[0]?.[0])).not.toContain("private night");
   expect(JSON.stringify(logged.mock.calls)).not.toContain("secret roles");
 });

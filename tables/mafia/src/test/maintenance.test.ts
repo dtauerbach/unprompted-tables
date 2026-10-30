@@ -4,8 +4,9 @@ import { POST as action } from "@/app/v1/matches/[id]/actions/route";
 import { GET as me } from "@/app/v1/me/route";
 import { POST as queue } from "@/app/v1/queue/route";
 import { GET as describe } from "@/app/v1/route";
-import { moveClock, now } from "@/lib/clock";
+import { moveClock, now, tableNow } from "@/lib/clock";
 import { act, start } from "@/lib/match";
+import { LOBBY_LOCK } from "@/lib/settings";
 import { startMatch, sweep, withMatch } from "@/lib/store";
 import { call, resetDb, sessionFor } from "./helpers";
 
@@ -113,11 +114,11 @@ it("starts a new match after its queue-lock wait, not at transaction start", asy
   let pending: ReturnType<typeof call> | undefined;
   let releaseTime = 0;
   await db().begin(async (tx) => {
-    await tx`SELECT pg_advisory_xact_lock(7402001)`;
+    await tx`SELECT pg_advisory_xact_lock(${LOBBY_LOCK})`;
     pending = call(queue, { session: tokens.at(-1), method: "POST" });
     await vi.waitFor(async () => {
       const [row] =
-        await tx`SELECT count(*)::int AS n FROM pg_locks WHERE locktype='advisory' AND objid=7402001 AND NOT granted`;
+        await tx`SELECT count(*)::int AS n FROM pg_locks WHERE locktype='advisory' AND objid=${LOBBY_LOCK} AND NOT granted`;
       expect(row?.n).toBe(1);
     });
     const [row] = await tx<{ t: Date }[]>`SELECT clock_timestamp() AS t`;
@@ -140,7 +141,7 @@ it("counts transaction time before a deadline-crossing lock wait", async () => {
       {
         players: 7,
         reveal_on_death: true,
-        talk_seconds: 1,
+        talk_seconds: 2,
         vote_seconds: 60,
         max_days: 20,
       },
@@ -163,7 +164,7 @@ it("counts transaction time before a deadline-crossing lock wait", async () => {
         await db()`SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%SELECT id FROM matches%'`;
       expect(rows.length).toBeGreaterThan(0);
     });
-    await tx`SELECT pg_sleep(1.1)`;
+    await tx`SELECT pg_sleep(2.1)`;
   });
   expect((await pending)?.status).toBe(200);
   expect(
@@ -220,4 +221,58 @@ it("the database rejects duplicate seats", async () => {
   await expect(
     db()`INSERT INTO matches(id,players) VALUES('m_aaaaaaaaaaaa',${Array(7).fill("alice")})`,
   ).rejects.toThrow();
+});
+
+it("isolates broken replay while sweeping healthy matches and expired credentials", async () => {
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  const broken = "m_bbbbbbbbbbbb";
+  await db()`INSERT INTO matches(id,players) VALUES(${broken},${players})`;
+  await db()`INSERT INTO open_matches(match_id,players,due) VALUES(${broken},${players},${now()})`;
+  const healthy = await db().begin((tx) => startMatch(tx, players));
+  await sessionFor("expired");
+  await db()`INSERT INTO queue(player,expires_at) VALUES('expired',${now()})`;
+  moveClock(86_400_001);
+  const [untouched] =
+    await db()`SELECT due FROM open_matches WHERE match_id=${healthy}`;
+  // Bracket the retry transaction with database reads. No assumption about
+  // test-runner speed or agreement between host and database clocks is needed.
+  const before = await db().begin(tableNow);
+  const realNow = Date.now();
+  const hostClock = vi.spyOn(Date, "now").mockReturnValue(realNow + 300_000);
+  try {
+    await sweep(1);
+  } finally {
+    hostClock.mockRestore();
+  }
+  const after = await db().begin(tableNow);
+  const [retried] =
+    await db()`SELECT due FROM open_matches WHERE match_id=${broken}`;
+  expect(retried?.due.getTime()).toBeGreaterThanOrEqual(
+    before.getTime() + 60_000,
+  );
+  expect(retried?.due.getTime()).toBeLessThanOrEqual(after.getTime() + 60_000);
+  const [stillUntouched] =
+    await db()`SELECT due FROM open_matches WHERE match_id=${healthy}`;
+  expect(stillUntouched?.due).toEqual(untouched?.due);
+  expect(
+    await db()`SELECT * FROM open_matches WHERE match_id=${healthy}`,
+  ).toHaveLength(1);
+  await sweep(1);
+  expect(
+    await db()`SELECT * FROM open_matches WHERE match_id=${healthy}`,
+  ).toHaveLength(0);
+  expect(
+    await db()`SELECT * FROM open_matches WHERE match_id=${broken}`,
+  ).toHaveLength(1);
+  expect(await db()`SELECT * FROM sessions`).toHaveLength(0);
+  expect(await db()`SELECT * FROM queue`).toHaveLength(0);
+  // Discovery performs its own sweep, so it must follow all progress assertions.
+  expect((await call(describe)).status).toBe(200);
+  const diagnostic = JSON.parse(logged.mock.calls[0]?.[0]);
+  expect(diagnostic).toMatchObject({
+    event: "mafia_failure",
+    operation: "sweep_match",
+    match: broken,
+    name: "Error",
+  });
 });
