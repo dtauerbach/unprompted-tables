@@ -6,16 +6,16 @@ import { applyMigrations, loadMigrations } from "@unprompted-tables/server";
 const onVercel = Boolean(process.env.VERCEL);
 const env = process.env.VERCEL_ENV;
 
-if (onVercel && !process.env.IP_HASH_SECRET) {
-  console.error("IP_HASH_SECRET is not set.");
-  process.exit(1);
-}
-
 // A preview build runs an unmerged branch's SQL, so previews skip
 // migrations unless each has its own database branch.
 if (onVercel && env !== "production" && process.env.MIGRATE_PREVIEWS !== "1") {
   console.log(`Skipping migrations on a ${env ?? "non-production"} build.`);
   process.exit(0);
+}
+
+if (onVercel && !process.env.IP_HASH_SECRET) {
+  console.error("IP_HASH_SECRET is not set.");
+  process.exit(1);
 }
 
 const url = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
