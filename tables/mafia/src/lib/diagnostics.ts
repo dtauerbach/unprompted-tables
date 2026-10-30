@@ -81,6 +81,7 @@ export function routeLabel(req: Request): string {
   return [
     "/v1",
     "/v1/me",
+    "/v1/lobby",
     "/v1/queue",
     "/v1/queue/leave",
     "/v1/sessions",

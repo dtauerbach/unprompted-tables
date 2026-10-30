@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { logFailure, routeLabel } from "@/lib/diagnostics";
+import { route } from "@/lib/http";
 
 afterEach(() => vi.restoreAllMocks());
 it("logs bounded diagnostics without exception payloads or forged names", () => {
@@ -79,4 +80,22 @@ it.each([
     operation: "/v1",
     name,
   });
+});
+
+it("labels unexpected lobby failures without logging query data", async () => {
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  const handler = route(async () => {
+    throw new Error("PRIVATE");
+  });
+  const response = await handler(
+    new Request("http://local/v1/lobby?token=PRIVATE"),
+    undefined,
+  );
+  expect(response.status).toBe(500);
+  expect(JSON.parse(logged.mock.calls[0]?.[0])).toEqual({
+    event: "mafia_failure",
+    operation: "/v1/lobby",
+    name: "Error",
+  });
+  expect(await response.text()).not.toContain("PRIVATE");
 });
