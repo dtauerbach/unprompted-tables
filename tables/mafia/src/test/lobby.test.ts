@@ -1,5 +1,6 @@
 import { db } from "@unprompted-tables/server";
 import { afterEach, beforeEach, expect, it } from "vitest";
+import { GET as guideRoute } from "@/app/skill.md/route";
 import { GET as lobbyRoute } from "@/app/v1/lobby/route";
 import { GET as getMatch } from "@/app/v1/matches/[id]/route";
 import { GET as me } from "@/app/v1/me/route";
@@ -45,14 +46,16 @@ it("shows who is seated and the rules, to anyone", async () => {
     fill_seconds: 120,
     hold_seconds: 180,
     seated: [],
+    needed: 5,
     starts_at: null,
   });
   const ps = await players(4);
   const [first] = await seat(ps);
   expect(first?.status).toBe(202);
-  expect(first?.body.lobby).toMatchObject({ seated: ["alice"] });
+  expect(first?.body.lobby).toMatchObject({ seated: ["alice"], needed: 4 });
   const view = await lobby();
   expect(view.seated).toEqual(["alice", "bobby", "carol", "david"]);
+  expect(view.needed).toBe(1);
   expect(view.starts_at).toBeNull();
   const description = (await call(describe)).body;
   expect(description.seats).toEqual([{ role: "player", min: 5, max: 7 }]);
@@ -288,4 +291,35 @@ it("starts one match however many players check in at the moment it is due", asy
   const ids = new Set(answers.map((a) => a.body.match));
   expect(ids.size).toBe(1);
   expect(await db()`SELECT * FROM matches`).toHaveLength(1);
+});
+
+it("says how many more players it needs, down to none once the minimum is seated", async () => {
+  const ps = await players(7);
+  const answers = await seat(ps.slice(0, 6));
+  expect(answers.map((a) => a.body.lobby?.needed)).toEqual([4, 3, 2, 1, 0, 0]);
+  // A waiting player sees the same count when it checks in.
+  const mine = await call(me, { session: ps[0]?.session });
+  expect(mine.body).toMatchObject({ status: "waiting", lobby: { needed: 0 } });
+  // A seat that lapses is no longer counted.
+  moveClock(181_000);
+  expect(await lobby()).toMatchObject({ seated: [], needed: 5 });
+});
+
+const fetchGuide = async () =>
+  (await guideRoute(new Request("https://mafia.test/skill.md"))).text();
+
+it("tells a bot how to find a game and what to do while it waits", async () => {
+  const guide = await fetchGuide();
+  const finding = guide.slice(
+    guide.indexOf("## Find a game"),
+    guide.indexOf("## Play"),
+  );
+  expect(finding).toMatch(/at least five players/i);
+  expect(finding).toContain("`needed`");
+  expect(finding).toMatch(/once a minute/);
+  expect(finding).toMatch(/on Unprompted/);
+  // Every placeholder is filled, and the session it names is this Table's.
+  expect(guide).not.toContain("{{");
+  expect(guide).toContain("@mafia-table");
+  expect(guide).toContain("Bearer mafia_");
 });

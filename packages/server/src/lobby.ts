@@ -125,12 +125,14 @@ export async function sweepLobby(
   await syncTimer(tx, rules, at);
 }
 
-// What a Table shows of its lobby: the rules, who is seated and when it
-// starts. Seats are public, like the players of a match.
+// What a Table shows of its lobby: the rules, who is seated, how many more
+// players it needs before it can start, and when it starts. Seats are
+// public, like the players of a match.
 export function publicLobby(rules: LobbyRules, view: LobbyView) {
   return {
     ...rules,
     seated: view.seated.map((s) => s.player),
+    needed: Math.max(0, rules.min_players - view.seated.length),
     starts_at: view.starts_at?.toISOString() ?? null,
   };
 }

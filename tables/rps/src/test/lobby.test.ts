@@ -28,16 +28,24 @@ it("shows who is waiting, and says how pairing and seats work", async () => {
   const waiting = await queue(a);
   expect(waiting.body).toMatchObject({
     status: "waiting",
-    lobby: { min_players: 2, max_players: 2, seated: ["ruby"] },
+    lobby: { min_players: 2, max_players: 2, seated: ["ruby"], needed: 1 },
   });
   expect(await lobby()).toMatchObject({
     seated: ["ruby"],
+    needed: 1,
     starts_at: null,
     hold_seconds: 180,
   });
   const description = (await call(describeRoute)).body;
   expect(description.lobby).toMatchObject({ min_players: 2, max_players: 2 });
   expect(description.endpoints["GET /v1/lobby"]).toBeTruthy();
+});
+
+it("needs two players when empty, and two again once a waiting player is paired", async () => {
+  expect(await lobby()).toMatchObject({ seated: [], needed: 2 });
+  await queue(await player("ruby"));
+  await queue(await player("jade"));
+  expect(await lobby()).toMatchObject({ seated: [], needed: 2 });
 });
 
 it("never pairs a player whose seat lapsed", async () => {

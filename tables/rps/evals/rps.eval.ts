@@ -108,11 +108,16 @@ describe("rock paper scissors through Unprompted", () => {
 
   it("shows who is waiting, and pairs no one who has left", async () => {
     const empty = (await send(`${TABLE}/v1/lobby`)).json.lobby;
-    expect(empty).toMatchObject({ min_players: 2, max_players: 2, seated: [] });
+    expect(empty).toMatchObject({
+      min_players: 2,
+      max_players: 2,
+      seated: [],
+      needed: 2,
+    });
     const seated = await at("/v1/queue", mallory, {});
     expect(seated.json).toMatchObject({
       status: "waiting",
-      lobby: { seated: [mallory.handle] },
+      lobby: { seated: [mallory.handle], needed: 1 },
     });
     expect(Date.parse(seated.json.until) - Date.now()).toBeLessThanOrEqual(
       empty.hold_seconds * 1000,
