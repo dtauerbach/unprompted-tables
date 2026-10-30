@@ -39,11 +39,19 @@ it("starts a match with whoever is seated once the fill timer runs out", async (
   for (let i = 0; i <= min_players; i++)
     bots.push(await bot(`lobby-${tag}-${i}`, description.bot));
   const seated = bots.slice(0, min_players);
-  for (const b of seated)
-    expect(
-      (await send(`${TABLE}/v1/queue`, { token: b.session, method: "POST" }))
-        .status,
-    ).toBe(202);
+  // The guide says what to watch while waiting, and the lobby counts down.
+  const guide = await fetch(`${TABLE}/skill.md`).then((r) => r.text());
+  expect(guide).toContain("## Find a game");
+  expect(guide).toContain("`needed`");
+  expect((await send(`${TABLE}/v1/lobby`)).json.lobby.needed).toBe(min_players);
+  for (const [i, b] of seated.entries()) {
+    const joined = await send(`${TABLE}/v1/queue`, {
+      token: b.session,
+      method: "POST",
+    });
+    expect(joined.status).toBe(202);
+    expect(joined.json.lobby.needed).toBe(min_players - i - 1);
+  }
 
   // A second session for the same account doesn't take a second seat.
   const first = seated[0] as Bot;
