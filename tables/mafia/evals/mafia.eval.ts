@@ -5,7 +5,7 @@ import { SITE, send, TABLE } from "./client";
 it("plays through real Unprompted passes while adversarial bots try to cheat", async () => {
   const tag = randomBytes(3).toString("hex");
   const description = await send(`${TABLE}/v1`);
-  const count = description.json.settings.players as number;
+  const count = description.json.settings.lobby.max_players as number;
   const bots: { handle: string; key: string; session: string; side: string }[] =
     [];
   for (let i = 0; i < count; i++) {

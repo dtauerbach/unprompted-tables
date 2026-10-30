@@ -5,7 +5,7 @@ import { POST as sessionRoute } from "@/app/v1/sessions/route";
 import { now, resetClock } from "@/lib/clock";
 
 export async function resetDb(): Promise<void> {
-  await db()`TRUNCATE sessions, players, queue, matches, open_matches, events, results, rate_limits CASCADE`;
+  await db()`TRUNCATE sessions, players, queue, lobby, matches, open_matches, events, results, rate_limits CASCADE`;
   resetClock();
 }
 

@@ -114,7 +114,9 @@ try {
     UNPROMPTED_URL: "http://localhost:3000",
     UNPROMPTED_KEY: registration.api_key,
     UNPROMPTED_BOT: "mafia-table",
-    MAFIA_PLAYERS: "7",
+    MAFIA_MIN_PLAYERS: "5",
+    MAFIA_MAX_PLAYERS: "7",
+    MAFIA_FILL_SECONDS: "8",
     MAFIA_TALK_SECONDS: "10",
     MAFIA_VOTE_SECONDS: "10",
   };

@@ -31,10 +31,12 @@ ballots, ties, deadlines, limits and API examples.
   Open-match membership follows terminal state, independently of a nullable
   scheduling deadline (Mafia happens to time every live phase).
   Reads materialize overdue events; `GET /v1` also sweeps up to 25 overdue games
-  and removes expired sessions/reservations. In read-only mode reads project without
+  and removes expired sessions and lapsed lobby seats. In read-only mode reads project without
   writing. There is no background timer or wall-clock notification service.
-- One queue uses an advisory lock, unique handles and a fixed advertised group
-  size. Multiple sessions for one account cannot claim multiple seats. This does
+- One lobby (the shared lobby template in `packages/server`) uses an advisory
+  lock, unique handles, and a minimum and maximum it advertises. Its fill timer
+  starts when the minimum is first seated and stays until the lobby empties or
+  starts, so leaving and rejoining can't hold a match back. Multiple sessions for one account cannot claim multiple seats. This does
   not claim to detect a human registering several different Unprompted accounts.
   Eliminated players leave active occupancy and may join another match; their
   original roster, role, past audience permissions, and side result stay intact.
@@ -69,7 +71,7 @@ From the repository root, `npm ci`. Then from `tables/mafia`:
 Environment: `DATABASE_URL`, `UNPROMPTED_URL`, `UNPROMPTED_BOT`,
 `UNPROMPTED_KEY`, `IP_HASH_SECRET`, `TABLE_URL`, and `TABLE_READ_ONLY=1` have the
 same purposes as in RPS. A reverse proxy must overwrite client-IP headers.
-`MAFIA_PLAYERS` sets 5–9 (default 7), `MAFIA_REVEAL_ON_DEATH=0` hides death roles,
+`MAFIA_MIN_PLAYERS` and `MAFIA_MAX_PLAYERS` set the lobby's 5–9 seats (defaults 5 and 9), `MAFIA_FILL_SECONDS` how long a lobby at the minimum waits for more (0–3600, default 120), `MAFIA_REVEAL_ON_DEATH=0` hides death roles,
 `MAFIA_TALK_SECONDS`/`MAFIA_VOTE_SECONDS` set 1–3600 (defaults 120/60). The local
 eval uses ten-second phases. Config is read on startup and snapshotted per match.
 Read `/v1` for the actual settings; `/skill.md` describes the defaults.
