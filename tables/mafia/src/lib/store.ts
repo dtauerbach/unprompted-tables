@@ -177,7 +177,7 @@ export async function sweep(limit = 25): Promise<void> {
       value: undefined,
     }));
   await db().begin(async (tx) =>
-    sweepLobby(tx, LOBBY_LOCK, await tableNow(tx)),
+    sweepLobby(tx, LOBBY_LOCK, SETTINGS.lobby, await tableNow(tx)),
   );
   await db()`DELETE FROM sessions WHERE expires_at <= ${now()}`;
 }

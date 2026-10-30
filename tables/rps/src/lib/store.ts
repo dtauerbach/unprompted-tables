@@ -17,7 +17,7 @@ import {
   places,
   replay,
 } from "./match";
-import { GAME, LOBBY_LOCK } from "./settings";
+import { GAME, LOBBY_LOCK, SETTINGS } from "./settings";
 
 // Matches in the database: their events, their results, and which are still
 // open. The rules of a match are in match.ts; this file runs each match's
@@ -203,7 +203,7 @@ export async function sweep(limit = 25): Promise<void> {
   for (const { match_id } of stale)
     await withMatch(match_id, async () => ({ events: [], value: undefined }));
   await db().begin(async (tx) =>
-    sweepLobby(tx, LOBBY_LOCK, await tableNow(tx)),
+    sweepLobby(tx, LOBBY_LOCK, SETTINGS.lobby, await tableNow(tx)),
   );
   await db()`DELETE FROM sessions WHERE expires_at <= ${now()}`;
 }

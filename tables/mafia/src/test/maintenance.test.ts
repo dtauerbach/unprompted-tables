@@ -39,7 +39,7 @@ it("publishes discoverable settings and fails when its bot is unconfigured", asy
     process.env.UNPROMPTED_BOT = bot;
   }
 });
-it("sweeps abandoned matches and expired reservations/sessions, but not in read-only mode", async () => {
+it("sweeps abandoned matches and lapsed lobby seats and expired sessions, but not in read-only mode", async () => {
   await sessionFor("expired");
   await db()`INSERT INTO queue(player,expires_at) VALUES('expired',${now()})`;
   const id = await db().begin((tx) => startMatch(tx, players));

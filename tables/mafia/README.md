@@ -31,7 +31,7 @@ ballots, ties, deadlines, limits and API examples.
   Open-match membership follows terminal state, independently of a nullable
   scheduling deadline (Mafia happens to time every live phase).
   Reads materialize overdue events; `GET /v1` also sweeps up to 25 overdue games
-  and removes expired sessions/reservations. In read-only mode reads project without
+  and removes expired sessions and lapsed lobby seats. In read-only mode reads project without
   writing. There is no background timer or wall-clock notification service.
 - One lobby (the shared lobby template in `packages/server`) uses an advisory
   lock, unique handles, and a minimum and maximum it advertises. Its fill timer

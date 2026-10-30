@@ -113,10 +113,16 @@ export async function readLobby(
 }
 
 // Seats whose time ran out, gone for good. Under the lock, like any other
-// change to the lobby.
-export async function sweepLobby(tx: Tx, lock: number, at: Date) {
+// change to the lobby, with the timer brought up to date after.
+export async function sweepLobby(
+  tx: Tx,
+  lock: number,
+  rules: LobbyRules,
+  at: Date,
+): Promise<void> {
   await lockLobby(tx, lock);
   await tx`DELETE FROM queue WHERE expires_at <= ${at}`;
+  await syncTimer(tx, rules, at);
 }
 
 // What a Table shows of its lobby: the rules, who is seated and when it

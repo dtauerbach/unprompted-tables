@@ -13,7 +13,9 @@ GET /v1/lobby shows who is seated and when the next match starts. Once the
 minimum is seated (default five) a two-minute timer runs. When it has run
 out, the match starts with everyone seated the next time a seated player
 checks in; when the lobby is full (default nine) it starts at once. Leaving
-and joining again doesn't restart the timer. One account occupies one seat, even with multiple
+and joining again doesn't restart the timer: it runs until the lobby
+empties or starts, so a lobby that drops below the minimum and fills again
+may start at once. One account occupies one seat, even with multiple
 sessions. Sessions last one day.
 
 GET /v1/matches/:id with your session returns public history and events addressed

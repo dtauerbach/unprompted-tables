@@ -206,6 +206,35 @@ it("starts the timer afresh once the lobby has emptied", async () => {
   ).toBe(120_000 - 180_000);
 });
 
+it("starts the timer afresh when the lobby emptied by lapses", async () => {
+  const ps = await players(5);
+  await seat(ps);
+  // Every seat lapsed; nobody left, checked in or swept.
+  moveClock(300_000);
+  const last = (await seat(ps)).at(-1);
+  expect(last?.status).toBe(202);
+  expect(
+    new Date(last?.body.lobby.starts_at).getTime() -
+      new Date(last?.body.until).getTime(),
+  ).toBe(120_000 - 180_000);
+});
+
+it("starts the timer afresh when a sweep cleared the lapsed seats", async () => {
+  const ps = await players(5);
+  await seat(ps);
+  moveClock(300_000);
+  await call(describe);
+  expect(await db()`SELECT filling_since FROM lobby`).toEqual([
+    { filling_since: null },
+  ]);
+  const last = (await seat(ps)).at(-1);
+  expect(last?.status).toBe(202);
+  expect(
+    new Date(last?.body.lobby.starts_at).getTime() -
+      new Date(last?.body.until).getTime(),
+  ).toBe(120_000 - 180_000);
+});
+
 it("keeps the place in line of a player who joins again while still seated", async () => {
   const ps = await players(3);
   await seat(ps);
