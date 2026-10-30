@@ -1,6 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { type Result, resultSchema } from "@unprompted-tables/game";
-import { ApiError, db, isReadOnly, type Tx } from "@unprompted-tables/server";
+import {
+  ApiError,
+  db,
+  isReadOnly,
+  sweepLobby,
+  type Tx,
+} from "@unprompted-tables/server";
 import { now, tableNow } from "./clock";
 import {
   advance,
@@ -11,7 +17,7 @@ import {
   places,
   replay,
 } from "./match";
-import { GAME } from "./settings";
+import { GAME, LOBBY_LOCK } from "./settings";
 
 // Matches in the database: their events, their results, and which are still
 // open. The rules of a match are in match.ts; this file runs each match's
@@ -196,7 +202,9 @@ export async function sweep(limit = 25): Promise<void> {
   );
   for (const { match_id } of stale)
     await withMatch(match_id, async () => ({ events: [], value: undefined }));
-  await db()`DELETE FROM queue WHERE expires_at <= ${now()}`;
+  await db().begin(async (tx) =>
+    sweepLobby(tx, LOBBY_LOCK, await tableNow(tx)),
+  );
   await db()`DELETE FROM sessions WHERE expires_at <= ${now()}`;
 }
 

@@ -24,7 +24,13 @@ export function describe(base: string) {
       match: `First to ${SETTINGS.rounds_to_win} round wins. Drawn rounds don't count. After ${SETTINGS.max_rounds} rounds the match ends anyway: more round wins wins, and level is a draw.`,
       seal: "sha256 of rps:<match>:<round>:<your handle>:<move>:<salt>, as 64 lowercase hex digits. The salt is 16 to 64 letters, digits, - or _.",
     },
-    seats: [{ role: "player", count: 2 }],
+    seats: [
+      {
+        role: "player",
+        min: SETTINGS.lobby.min_players,
+        max: SETTINGS.lobby.max_players,
+      },
+    ],
     clock: {
       ...SETTINGS.clock,
       on_timeout:

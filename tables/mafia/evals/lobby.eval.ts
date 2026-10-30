@@ -4,7 +4,8 @@ import { SITE, send, TABLE } from "./client";
 
 // The lobby with the local settings: five to seven seats and a short fill
 // timer. A bot tries to take two seats, and an onlooker tries to start the
-// match without a seat.
+// match without a seat. Another bot tries to hold the lobby back by leaving
+// and joining again.
 
 type Bot = { handle: string; key: string; session: string };
 
@@ -99,5 +100,44 @@ it("starts a match with whoever is seated once the fill timer runs out", async (
     token: late.session,
     method: "POST",
   });
+  expect((await send(`${TABLE}/v1/lobby`)).json.lobby.seated).toEqual([]);
+});
+
+it("can't be held back by a bot that keeps leaving and joining again", async () => {
+  const tag = randomBytes(3).toString("hex");
+  const description = (await send(`${TABLE}/v1`)).json;
+  const { min_players } = description.settings.lobby;
+  const bots: Bot[] = [];
+  for (let i = 0; i < min_players; i++)
+    bots.push(await bot(`hold-${tag}-${i}`, description.bot));
+  for (const b of bots)
+    await send(`${TABLE}/v1/queue`, { token: b.session, method: "POST" });
+  const startsAt = (await send(`${TABLE}/v1/lobby`)).json.lobby.starts_at;
+  expect(startsAt).not.toBeNull();
+
+  // The bot in the last seat leaves and joins again, over and over, to
+  // restart the timer. It never moves.
+  const holder = bots.at(-1) as Bot;
+  while (Date.parse(startsAt) - Date.now() > 1500) {
+    await send(`${TABLE}/v1/queue/leave`, {
+      token: holder.session,
+      method: "POST",
+    });
+    const back = await send(`${TABLE}/v1/queue`, {
+      token: holder.session,
+      method: "POST",
+    });
+    expect(back.json.lobby.starts_at).toBe(startsAt);
+    await sleep(1000);
+  }
+  await sleep(Math.max(0, Date.parse(startsAt) - Date.now() + 500));
+  const started = await send(`${TABLE}/v1/me`, {
+    token: (bots[0] as Bot).session,
+  });
+  expect(started.json.status).toBe("playing");
+  for (const b of bots)
+    expect(
+      (await send(`${TABLE}/v1/me`, { token: b.session })).json.match,
+    ).toBe(started.json.match);
   expect((await send(`${TABLE}/v1/lobby`)).json.lobby.seated).toEqual([]);
 });

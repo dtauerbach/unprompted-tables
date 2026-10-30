@@ -18,7 +18,8 @@ export type Seat = { player: string; joined_at: Date; expires_at: Date };
 export type LobbyView = {
   // Live seats, earliest first.
   seated: Seat[];
-  // When the lobby starts if nobody leaves; null until the minimum is seated.
+  // When the lobby starts if nobody leaves; null while it is below the
+  // minimum.
   starts_at: Date | null;
 };
 
@@ -34,40 +35,57 @@ export function lobbyRules(rules: LobbyRules): LobbyRules {
   return { min_players, max_players, fill_seconds, hold_seconds };
 }
 
-// Only seats still held count. The timer runs from when the minimum-th
-// live seat joined, so a player leaving pushes the start back rather than
-// leaving a stale timer behind.
-export function viewLobby(
-  rules: LobbyRules,
-  seats: Seat[],
-  at: Date,
-): LobbyView {
-  const seated = seats
+function live(seats: Seat[], at: Date): Seat[] {
+  return seats
     .filter((s) => s.expires_at > at)
     .sort(
       (a, b) =>
         a.joined_at.getTime() - b.joined_at.getTime() ||
         (a.player < b.player ? -1 : a.player > b.player ? 1 : 0),
     );
+}
+
+// When the fill timer started, kept by the Table and brought up to date
+// with this at every change to the lobby. It starts the first time the
+// minimum is seated and stays until the lobby empties or starts, so a
+// player who leaves and joins again can't hold the lobby back by
+// restarting it.
+export function fillingSince(
+  rules: LobbyRules,
+  seats: Seat[],
+  at: Date,
+  since: Date | null,
+): Date | null {
+  const seated = live(seats, at);
+  if (seated.length === 0) return null;
+  if (since) return since;
+  return seated.length >= rules.min_players ? at : null;
+}
+
+export function viewLobby(
+  rules: LobbyRules,
+  seats: Seat[],
+  at: Date,
+  since: Date | null,
+): LobbyView {
+  const seated = live(seats, at);
   let starts_at: Date | null = null;
-  if (seated.length >= rules.max_players)
-    starts_at = (seated[rules.max_players - 1] as Seat).joined_at;
+  if (seated.length >= rules.max_players) starts_at = at;
   else if (seated.length >= rules.min_players)
-    starts_at = new Date(
-      (seated[rules.min_players - 1] as Seat).joined_at.getTime() +
-        rules.fill_seconds * 1000,
-    );
+    starts_at = new Date((since ?? at).getTime() + rules.fill_seconds * 1000);
   return { seated, starts_at };
 }
 
 // The players to start a match with now, earliest first, or null if the
-// lobby isn't due.
+// lobby isn't due. A full lobby is always due, whatever the clocks say.
 export function dueToStart(
   rules: LobbyRules,
   seats: Seat[],
   at: Date,
+  since: Date | null,
 ): string[] | null {
-  const { seated, starts_at } = viewLobby(rules, seats, at);
-  if (!starts_at || starts_at > at) return null;
+  const { seated, starts_at } = viewLobby(rules, seats, at, since);
+  if (seated.length < rules.max_players && (!starts_at || starts_at > at))
+    return null;
   return seated.slice(0, rules.max_players).map((s) => s.player);
 }

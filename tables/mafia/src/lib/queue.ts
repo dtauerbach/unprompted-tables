@@ -1,7 +1,7 @@
 import { lobbyQueue } from "@unprompted-tables/server";
-import { now } from "./clock";
+import { tableNow } from "./clock";
 import { queueRules } from "./limits";
-import { SETTINGS } from "./settings";
+import { LOBBY_LOCK, SETTINGS } from "./settings";
 import { openMatchOf, startMatch, withMatch } from "./store";
 
 // Seating goes through the lobby template: once the minimum is seated a
@@ -9,8 +9,8 @@ import { openMatchOf, startMatch, withMatch } from "./store";
 // full. One lobby at a time, so concurrent joins cannot claim the same seats.
 export const { joinQueue, leaveQueue, standingOf, lobby } = lobbyQueue({
   rules: SETTINGS.lobby,
-  lock: 7_402_001,
-  now,
+  lock: LOBBY_LOCK,
+  now: tableNow,
   joinRules: queueRules,
   openMatchOf,
   settleMatch: async (match) => {

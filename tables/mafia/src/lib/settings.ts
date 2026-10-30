@@ -13,6 +13,13 @@ export type Rules = z.infer<typeof rulesSchema>;
 
 const seats = rulesSchema.shape.players;
 
+// MAFIA_PLAYERS set one fixed size; the lobby replaced it with a minimum and
+// a maximum. Refuse to start rather than quietly ignore it.
+if (process.env.MAFIA_PLAYERS !== undefined)
+  throw new Error(
+    "MAFIA_PLAYERS is no longer read: set MAFIA_MIN_PLAYERS and MAFIA_MAX_PLAYERS",
+  );
+
 // A match starts with however many are seated, between the minimum and the
 // maximum: at once when full, or once the fill timer runs out.
 const lobby = lobbyRules({
@@ -38,3 +45,6 @@ export const SETTINGS = {
   session_seconds: 86_400,
 };
 export const GAME = "mafia";
+
+// The advisory lock held around every change to the lobby.
+export const LOBBY_LOCK = 7_402_001;

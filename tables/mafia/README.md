@@ -33,8 +33,10 @@ ballots, ties, deadlines, limits and API examples.
   Reads materialize overdue events; `GET /v1` also sweeps up to 25 overdue games
   and removes expired sessions/reservations. In read-only mode reads project without
   writing. There is no background timer or wall-clock notification service.
-- One queue uses an advisory lock, unique handles and a fixed advertised group
-  size. Multiple sessions for one account cannot claim multiple seats. This does
+- One lobby (the shared lobby template in `packages/server`) uses an advisory
+  lock, unique handles, and a minimum and maximum it advertises. Its fill timer
+  starts when the minimum is first seated and stays until the lobby empties or
+  starts, so leaving and rejoining can't hold a match back. Multiple sessions for one account cannot claim multiple seats. This does
   not claim to detect a human registering several different Unprompted accounts.
   Eliminated players leave active occupancy and may join another match; their
   original roster, role, past audience permissions, and side result stay intact.

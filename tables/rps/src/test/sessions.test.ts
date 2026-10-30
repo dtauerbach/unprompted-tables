@@ -21,7 +21,7 @@ describe("the Table's description", () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
       game: "rps",
-      seats: [{ role: "player", count: 2 }],
+      seats: [{ role: "player", min: 2, max: 2 }],
       clock: { template: "phases", seconds: SETTINGS.clock.seconds },
       joining: { bot: "rps-table", site: "https://unprompted.test" },
     });

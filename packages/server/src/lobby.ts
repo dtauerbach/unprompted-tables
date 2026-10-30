@@ -1,5 +1,6 @@
 import {
   dueToStart,
+  fillingSince,
   type LobbyRules,
   type LobbyView,
   type Seat,
@@ -9,8 +10,9 @@ import { db, type Tx } from "./db";
 import { consume, type Rule } from "./limits";
 
 // A Table that uses the lobby template keeps its seats in a table named
-// queue (player, joined_at, expires_at), and holds its own lobby lock, the
-// lock argument here, around every change to it. One lobby at a time, so
+// queue (player, joined_at, expires_at) and its fill timer in a one-row
+// table named lobby (id, filling_since), and holds its own lobby lock, the
+// lock argument here, around every change to them. One lobby at a time, so
 // two joins at once can't both claim the same seats.
 
 export async function lockLobby(tx: Tx, lock: number): Promise<void> {
@@ -20,6 +22,31 @@ export async function lockLobby(tx: Tx, lock: number): Promise<void> {
 async function liveSeats(tx: Tx, at: Date): Promise<Seat[]> {
   return tx<Seat[]>`
     SELECT player, joined_at, expires_at FROM queue WHERE expires_at > ${at}`;
+}
+
+async function timer(tx: Tx): Promise<Date | null> {
+  const [row] = await tx<{ filling_since: Date | null }[]>`
+    SELECT filling_since FROM lobby`;
+  return row?.filling_since ?? null;
+}
+
+async function setTimer(tx: Tx, since: Date | null): Promise<void> {
+  await tx`
+    INSERT INTO lobby (id, filling_since) VALUES (true, ${since})
+    ON CONFLICT (id) DO UPDATE SET filling_since = EXCLUDED.filling_since`;
+}
+
+// Bring the fill timer up to date with the seats. Run before and after
+// every change, under the lobby lock: before, so a lobby that emptied while
+// nobody looked starts afresh; after, so the change starts the timer.
+export async function syncTimer(
+  tx: Tx,
+  rules: LobbyRules,
+  at: Date,
+): Promise<void> {
+  const before = await timer(tx);
+  const since = fillingSince(rules, await liveSeats(tx, at), at, before);
+  if (since?.getTime() !== before?.getTime()) await setTimer(tx, since);
 }
 
 // Take a seat, or keep one. A seat still held keeps its place in line; one
@@ -58,14 +85,22 @@ export async function checkIn(
 }
 
 // If the lobby is due, take its players out of it and return them for the
-// Table to start a match with.
+// Table to start a match with. Whoever is left starts a new lobby.
 export async function takeDue(
   tx: Tx,
   rules: LobbyRules,
   at: Date,
 ): Promise<string[] | null> {
-  const players = dueToStart(rules, await liveSeats(tx, at), at);
-  if (players) await tx`DELETE FROM queue WHERE player = ANY(${players})`;
+  const players = dueToStart(
+    rules,
+    await liveSeats(tx, at),
+    at,
+    await timer(tx),
+  );
+  if (!players) return null;
+  await tx`DELETE FROM queue WHERE player = ANY(${players})`;
+  await setTimer(tx, null);
+  await syncTimer(tx, rules, at);
   return players;
 }
 
@@ -74,7 +109,14 @@ export async function readLobby(
   rules: LobbyRules,
   at: Date,
 ): Promise<LobbyView> {
-  return viewLobby(rules, await liveSeats(tx, at), at);
+  return viewLobby(rules, await liveSeats(tx, at), at, await timer(tx));
+}
+
+// Seats whose time ran out, gone for good. Under the lock, like any other
+// change to the lobby.
+export async function sweepLobby(tx: Tx, lock: number, at: Date) {
+  await lockLobby(tx, lock);
+  await tx`DELETE FROM queue WHERE expires_at <= ${at}`;
 }
 
 // What a Table shows of its lobby: the rules, who is seated and when it
@@ -93,11 +135,12 @@ export type Standing =
   | { status: "idle" };
 
 // What a Table hands the lobby: its rules and lock, its clock, and how it
-// finds, brings up to date and starts its matches.
+// finds, brings up to date and starts its matches. The clock is read from
+// the database, so every server running the Table stamps seats alike.
 export type LobbyTable = {
   rules: LobbyRules;
   lock: number;
-  now: () => Date;
+  now: (tx: Tx) => Promise<Date>;
   joinRules: (player: string) => Rule[];
   openMatchOf: (tx: Tx, player: string) => Promise<string | null>;
   settleMatch: (match: string) => Promise<void>;
@@ -117,36 +160,45 @@ export function lobbyQueue(t: LobbyTable) {
     if (open) await t.settleMatch(open);
   }
 
-  async function startDue(tx: Tx): Promise<void> {
-    const players = await takeDue(tx, t.rules, t.now());
+  // Every change to the lobby, under its lock: the timer brought up to date
+  // on both sides of it, then whatever match is due started.
+  async function change(
+    tx: Tx,
+    at: Date,
+    what: () => Promise<unknown>,
+  ): Promise<void> {
+    await syncTimer(tx, t.rules, at);
+    await what();
+    await syncTimer(tx, t.rules, at);
+    const players = await takeDue(tx, t.rules, at);
     if (players) await t.startMatch(tx, players);
   }
 
-  async function standingIn(tx: Tx, player: string): Promise<Standing> {
+  async function standingIn(tx: Tx, player: string, at: Date) {
     const current = await t.openMatchOf(tx, player);
-    if (current) return { status: "playing", match: current };
-    const view = await readLobby(tx, t.rules, t.now());
+    if (current) return { status: "playing", match: current } as const;
+    const view = await readLobby(tx, t.rules, at);
     const seat = view.seated.find((s) => s.player === player);
     return seat
-      ? {
+      ? ({
           status: "waiting",
           until: seat.expires_at,
           lobby: publicLobby(t.rules, view),
-        }
-      : { status: "idle" };
+        } as const)
+      : ({ status: "idle" } as const);
   }
 
   return {
     async joinQueue(player: string): Promise<Standing> {
       await settle(player);
       return db().begin(async (tx) => {
+        const at = await t.now(tx);
         await lockLobby(tx, t.lock);
         const current = await t.openMatchOf(tx, player);
         if (current) return { status: "playing", match: current };
         await consume(tx, t.joinRules(player));
-        await holdSeat(tx, t.rules, player, t.now());
-        await startDue(tx);
-        return standingIn(tx, player);
+        await change(tx, at, () => holdSeat(tx, t.rules, player, at));
+        return standingIn(tx, player, at);
       });
     },
 
@@ -154,31 +206,45 @@ export function lobbyQueue(t: LobbyTable) {
       await db().begin(async (tx) => {
         // The lobby may already have taken this seat for a match. Leaving
         // waits for that, so it can't say idle before the match exists.
+        const at = await t.now(tx);
         await lockLobby(tx, t.lock);
-        await tx`DELETE FROM queue WHERE player = ${player}`;
+        await change(
+          tx,
+          at,
+          () => tx`DELETE FROM queue WHERE player = ${player}`,
+        );
       });
     },
 
+    // Checking in writes only when it matters: when the seat is past half
+    // its time, or the lobby is due. A player polling every few seconds
+    // doesn't take the lock each time.
     async standingOf(player: string, writable: boolean): Promise<Standing> {
       if (writable) await settle(player);
       return db().begin(async (tx) => {
+        const at = await t.now(tx);
         if (writable) {
-          const [seated] = await tx`
-            SELECT 1 FROM queue
-            WHERE player = ${player} AND expires_at > ${t.now()}`;
-          if (seated) {
+          const seats = await liveSeats(tx, at);
+          const seat = seats.find((s) => s.player === player);
+          const fresh =
+            seat &&
+            seat.expires_at.getTime() - at.getTime() >
+              (t.rules.hold_seconds * 1000) / 2;
+          if (
+            seat &&
+            (!fresh || dueToStart(t.rules, seats, at, await timer(tx)))
+          ) {
             await lockLobby(tx, t.lock);
-            await checkIn(tx, t.rules, player, t.now());
-            await startDue(tx);
+            await change(tx, at, () => checkIn(tx, t.rules, player, at));
           }
         }
-        return standingIn(tx, player);
+        return standingIn(tx, player, at);
       });
     },
 
     async lobby() {
       return db().begin(async (tx) =>
-        publicLobby(t.rules, await readLobby(tx, t.rules, t.now())),
+        publicLobby(t.rules, await readLobby(tx, t.rules, await t.now(tx))),
       );
     },
   };

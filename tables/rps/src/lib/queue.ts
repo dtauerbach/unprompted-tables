@@ -1,7 +1,7 @@
 import { lobbyQueue } from "@unprompted-tables/server";
-import { now } from "./clock";
+import { tableNow } from "./clock";
 import { queueRules } from "./limits";
-import { SETTINGS } from "./settings";
+import { LOBBY_LOCK, SETTINGS } from "./settings";
 import { openMatchOf, startMatch, withMatch } from "./store";
 
 // Pairing goes through the lobby template: two players start a match as
@@ -10,8 +10,8 @@ import { openMatchOf, startMatch, withMatch } from "./store";
 // third, or each wait for the other.
 export const { joinQueue, leaveQueue, standingOf, lobby } = lobbyQueue({
   rules: SETTINGS.lobby,
-  lock: 7_402_001,
-  now,
+  lock: LOBBY_LOCK,
+  now: tableNow,
   joinRules: queueRules,
   openMatchOf,
   settleMatch: async (match) => {

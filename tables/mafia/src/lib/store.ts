@@ -1,6 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { sideResultSchema } from "@unprompted-tables/game";
-import { ApiError, db, isReadOnly, type Tx } from "@unprompted-tables/server";
+import {
+  ApiError,
+  db,
+  isReadOnly,
+  sweepLobby,
+  type Tx,
+} from "@unprompted-tables/server";
 import { matchStartTime, now, tableNow } from "./clock";
 import {
   advance,
@@ -12,7 +18,7 @@ import {
   start,
   view,
 } from "./match";
-import { SETTINGS } from "./settings";
+import { LOBBY_LOCK, SETTINGS } from "./settings";
 
 // Matches in the database: their events, their results, and which are still
 // open. The rules of a match are in match.ts; this file runs each match's
@@ -170,10 +176,8 @@ export async function sweep(limit = 25): Promise<void> {
       events: [],
       value: undefined,
     }));
-  await db().begin(async (tx) => {
-    // Serialize reservation removal with matchmaking's selection.
-    await tx`SELECT pg_advisory_xact_lock(7402001)`;
-    await tx`DELETE FROM queue WHERE expires_at <= ${now()}`;
-  });
+  await db().begin(async (tx) =>
+    sweepLobby(tx, LOBBY_LOCK, await tableNow(tx)),
+  );
   await db()`DELETE FROM sessions WHERE expires_at <= ${now()}`;
 }

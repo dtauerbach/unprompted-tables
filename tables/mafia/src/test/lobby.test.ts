@@ -137,18 +137,10 @@ it("counts only seats still held when it is due, so a lapsed seat is never dealt
   moveClock(100_000);
   for (const p of ps.slice(0, 4)) await call(me, { session: p.session });
   await seat(ps.slice(5));
-  // At 191 seconds ellen's seat has lapsed, so the fifth live seat is
-  // frank's and the timer runs from his join instead.
+  // At 190 seconds ellen's seat has lapsed. The timer still stands, so the
+  // next check-in starts the match with the five seats still held.
   moveClock(85_000);
-  const waiting = await call(me, { session: ps[0]?.session });
-  expect(waiting.body.status).toBe("waiting");
-  expect(waiting.body.lobby.seated).not.toContain("ellen");
-  expect(
-    new Date(waiting.body.lobby.starts_at).getTime() -
-      new Date(waiting.body.until).getTime(),
-  ).toBeLessThan(0);
-  moveClock(40_000);
-  const answer = await call(me, { session: ps[5]?.session });
+  const answer = await call(me, { session: ps[0]?.session });
   expect(answer.body.status).toBe("playing");
   const state = (
     await call(getMatch, {
@@ -164,21 +156,81 @@ it("counts only seats still held when it is due, so a lapsed seat is never dealt
   );
 });
 
-it("pushes the start back when a player leaves, and stops it below the minimum", async () => {
+it("keeps the fill timer when a player leaves, and waits while below the minimum", async () => {
   const ps = await players(6);
   await seat(ps);
-  const before = new Date((await lobby()).starts_at).getTime();
+  const before = (await lobby()).starts_at;
   await call(leave, { session: ps[0]?.session, method: "POST" });
-  const after = new Date((await lobby()).starts_at).getTime();
-  // The fifth seat is now frank's, taken a second after ellen's.
-  expect(after - before).toBeGreaterThanOrEqual(1000);
-  expect(after - before).toBeLessThan(1500);
+  expect((await lobby()).starts_at).toBe(before);
   await call(leave, { session: ps[1]?.session, method: "POST" });
   expect((await lobby()).starts_at).toBeNull();
   moveClock(600_000);
   expect((await call(me, { session: ps[2]?.session })).body.status).toBe(
     "idle",
   );
+});
+
+it("can't be held back by the player in the last seat leaving and joining again", async () => {
+  const ps = await players(5);
+  await seat(ps);
+  const startsAt = (await lobby()).starts_at;
+  const ellen = ps[4] as { session: string };
+  for (let i = 0; i < 4; i++) {
+    moveClock(25_000);
+    await call(leave, { session: ellen.session, method: "POST" });
+    expect((await lobby()).starts_at).toBeNull();
+    const back = await call(queue, { session: ellen.session, method: "POST" });
+    expect(back.body.lobby.starts_at).toBe(startsAt);
+  }
+  // 104 seconds in; the timer runs out at 124.
+  moveClock(20_000);
+  const answer = await call(me, { session: ps[0]?.session });
+  expect(answer.body.status).toBe("playing");
+  expect((await call(me, { session: ellen.session })).body).toMatchObject({
+    status: "playing",
+    match: answer.body.match,
+  });
+});
+
+it("starts the timer afresh once the lobby has emptied", async () => {
+  const ps = await players(5);
+  await seat(ps);
+  for (const p of ps) await call(leave, { session: p.session, method: "POST" });
+  moveClock(300_000);
+  const answers = await seat(ps);
+  const lobbyNow = answers.at(-1)?.body.lobby;
+  expect(lobbyNow.seated).toHaveLength(5);
+  expect(
+    new Date(lobbyNow.starts_at).getTime() -
+      new Date(answers.at(-1)?.body.until).getTime(),
+  ).toBe(120_000 - 180_000);
+});
+
+it("keeps the place in line of a player who joins again while still seated", async () => {
+  const ps = await players(3);
+  await seat(ps);
+  const again = await call(queue, { session: ps[0]?.session, method: "POST" });
+  expect(again.body.lobby.seated).toEqual(["alice", "bobby", "carol"]);
+});
+
+it("writes nothing on a check-in while the seat has more than half its time left", async () => {
+  const ps = await players(2);
+  await seat(ps);
+  const until = async () =>
+    (
+      (await db()`SELECT expires_at FROM queue WHERE player = 'alice'`) as unknown as [
+        { expires_at: Date },
+      ]
+    )[0].expires_at.getTime();
+  const first = await until();
+  moveClock(30_000);
+  expect((await call(me, { session: ps[0]?.session })).body.status).toBe(
+    "waiting",
+  );
+  expect(await until()).toBe(first);
+  moveClock(70_000);
+  await call(me, { session: ps[0]?.session });
+  expect(await until()).toBeGreaterThan(first);
 });
 
 it("in read-only mode shows the lobby but neither keeps seats nor starts a match", async () => {

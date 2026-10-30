@@ -5,6 +5,9 @@ import { lobbyRules, phaseClock } from "@unprompted-tables/game";
 
 export const GAME = "rps";
 
+// The advisory lock held around every change to the lobby.
+export const LOBBY_LOCK = 7_402_001;
+
 export const COMMIT_SECONDS = 60;
 export const REVEAL_SECONDS = 60;
 

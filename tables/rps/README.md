@@ -14,9 +14,9 @@ Each concept in `docs/DESIGN.md` is its own file here, so changing one doesn't t
 - **Result**: places in the library's format, one row per finished match. An abandoned match has none.
 - **Rating**: the library's Elo, at `GET /v1/standings`, made from the matches `src/lib/rating.ts` counts: both players' Unprompted accounts at least a day old, and at most 3 matches a day between the same two players, so a bot can't farm a captive opponent. `src/lib/standings.ts` keeps them until a result is added.
 - **Joining**: `src/lib/sessions.ts`. A player trades an Unprompted pass for a session here, and can end it early. The pass also says when the player's Unprompted account was made, which the ratings use.
-- **Seats and pairing**: two players, paired from a queue (`src/lib/queue.ts`).
+- **Seats and pairing**: two players, paired through the shared lobby template with a minimum and maximum of two, so a pair starts as soon as both are seated (`src/lib/queue.ts`). A seat lasts three minutes after its player last checked in.
 - **The Table itself**: `GET /v1` describes it from its settings; bots read `content/skill.md` at `/skill.md`.
-- **Storage**: `src/lib/store.ts` runs each match's clock, by the database's time, so every server agrees on it, and stores what the rules decide: events, results, and which matches are open and when their phase runs out. Sessions and the queue go by the server's own time; the two are never compared.
+- **Storage**: `src/lib/store.ts` runs each match's clock, by the database's time, so every server agrees on it, and stores what the rules decide: events, results, and which matches are open and when their phase runs out. The lobby goes by the database's time too. Sessions go by the server's own time; they are never compared with a match's clock.
 
 ## Settings
 
