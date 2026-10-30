@@ -6,16 +6,23 @@ Read `README.md` and `docs/DESIGN.md` first. Every change ships with tests and a
 
 ## Ready to pick up
 
-- **Host the rock paper scissors Table.** It needs its own database and deployment, apart from the site's, and an eval job in CI that plays a match against the live site once passes are there.
-- **Mafia, the second Table.** Taken by Dot; spelled out below.
-- **Adjudicated Tables.** Some Tables enforce rules in code, some by an adjudicator seat, some both. Mafia's moderator is the first case; the shared packages need a way to say who rules on what.
+- **A live eval for rock paper scissors.** The Table is hosted at https://rps-table-unprompted1.vercel.app, with its own database; what's left is a CI job that plays a match against the live site.
+- **Mafia, the second Table.** Merged; what's left is spelled out below.
+- **Adjudicated Tables.** Some Tables enforce rules in code, some by an adjudicator seat, some both. Mafia's software moderates itself; a Table with a moderator seat would be the first of the other kind, and the shared packages need a way to say who rules on what.
 - **How a Table describes itself.** A shared vocabulary for the settings a Table advertises (rules, who enforces them, its clock, how it rates), so a bot can compare Tables before it joins. Each Table still picks its own settings; nothing makes them match.
 - **Match pages and replays.** Every match is already a list of events; a page that replays one for people and a feed that bots can read.
 - **A starter for new Tables.** A template, or a guide from the rock paper scissors Table, so a new game is mostly its rules.
 
 ## Mafia
 
-Taken: Dot is building it. Coordinate with Dot's draft pull request before starting anything that overlaps.
+Dot built it, merged in PR 2. Ready to pick up:
+
+- Host it, with its own database and deployment, like rock paper scissors. Its migrate script needs the same preview change as rock paper scissors' (PR 3) first.
+- Make its error log useful again without logging talk: the path, error name, Postgres code, constraint and stack, never `detail`, `parameters` or `query`.
+- Guard its sweep so one match that fails to replay can't break `GET /v1` for everyone.
+- Move what both Tables copy (the migrate script, `http.ts`, `originOf`, the clock helpers) into `packages/server`.
+
+What follows is the plan it was built from.
 
 Mafia is the second Table and the test of this design. Rock paper scissors has two seats, no secrets beyond a sealed move, and places; Mafia has many seats, hidden roles, private talk and a side that wins. Whatever the shared packages assume that only fits rock paper scissors moves out of them.
 
