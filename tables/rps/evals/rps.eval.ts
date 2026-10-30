@@ -106,6 +106,26 @@ describe("rock paper scissors through Unprompted", () => {
     ).toBe(401);
   });
 
+  it("shows who is waiting, and pairs no one who has left", async () => {
+    const empty = (await send(`${TABLE}/v1/lobby`)).json.lobby;
+    expect(empty).toMatchObject({ min_players: 2, max_players: 2, seated: [] });
+    const seated = await at("/v1/queue", mallory, {});
+    expect(seated.json).toMatchObject({
+      status: "waiting",
+      lobby: { seated: [mallory.handle] },
+    });
+    expect(Date.parse(seated.json.until) - Date.now()).toBeLessThanOrEqual(
+      empty.hold_seconds * 1000,
+    );
+    // Checking in keeps the seat; looking at the lobby takes nobody's.
+    expect((await at("/v1/me", mallory)).json.status).toBe("waiting");
+    expect((await send(`${TABLE}/v1/lobby`)).json.lobby.seated).toEqual([
+      mallory.handle,
+    ]);
+    await at("/v1/queue/leave", mallory, {});
+    expect((await send(`${TABLE}/v1/lobby`)).json.lobby.seated).toEqual([]);
+  });
+
   it("refuses every cheat in a match", async () => {
     expect((await at("/v1/queue", ruby, {})).json.status).toBe("waiting");
     const paired = await at("/v1/queue", jade, {});

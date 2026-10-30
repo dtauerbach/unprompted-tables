@@ -2,6 +2,7 @@ export * from "./clock";
 export * from "./elo";
 export * from "./events";
 export * from "./ids";
+export * from "./lobby";
 export * from "./result";
 export * from "./seal";
 export * from "./side-result";

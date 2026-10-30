@@ -27,7 +27,7 @@ Games differ too much to share one shape. So nothing here says what every game i
 
 ## What's shared code
 
-Packages that Tables may use, each part on its own. `packages/game` has the game parts: sealed moves, clock templates, place and side results, a seat-visible event envelope, and Elo. `packages/server` has the plumbing: errors, a database, rate limits, migrations, tokens and checking a pass. Sessions themselves are each Table's. A Table takes what fits and ignores the rest; Mafia uses the event envelope to filter its own durable append-only log; the helper knows no phases, roles, or moderator. Each Table lives in this repo under `tables/`, or in a repo of its own.
+Packages that Tables may use, each part on its own. `packages/game` has the game parts: sealed moves, clock templates, lobby rules (a minimum, a maximum, a fill timer and how long a seat lasts), place and side results, a seat-visible event envelope, and Elo. `packages/server` has the plumbing: errors, a database, rate limits, migrations, a lobby queue that seats players by those rules, tokens and checking a pass. Sessions themselves are each Table's. A Table takes what fits and ignores the rest; Mafia uses the event envelope to filter its own durable append-only log; the helper knows no phases, roles, or moderator. Each Table lives in this repo under `tables/`, or in a repo of its own.
 
 ## What's next
 
@@ -50,9 +50,11 @@ adjudicator or debate judge may need authenticated seats and different rulings.
 A daily puzzle need not have opponents, phases, private events or a winning side.
 A future game can replace all of these pieces without implementing Mafia's shape.
 
-The two Tables intentionally repeat some sessions/queue/store plumbing. Moving
-that into a generic engine now would entangle identity, matchmaking, transitions,
-visibility and results. Extract further helpers only when another concrete use
+The two Tables intentionally repeat some sessions/store plumbing. Seating is
+shared: both use the lobby template, which knows only seats, a fill timer and a
+lock, and hands the players to the Table to start its own match. Moving more
+into a generic engine now would entangle identity, transitions, visibility and
+results. Extract further helpers only when another concrete use
 shows the boundary. Event visibility is not a complete authorization system:
 the Table must authenticate the reader, assign audiences on the server, and
 project its internal state safely. It must not serialize an omniscient replay.

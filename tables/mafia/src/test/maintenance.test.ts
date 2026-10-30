@@ -6,7 +6,7 @@ import { POST as queue } from "@/app/v1/queue/route";
 import { GET as describe } from "@/app/v1/route";
 import { moveClock, now, tableNow } from "@/lib/clock";
 import { act, start } from "@/lib/match";
-import { QUEUE_LOCK } from "@/lib/settings";
+import { LOBBY_LOCK } from "@/lib/settings";
 import { startMatch, sweep, withMatch } from "@/lib/store";
 import { call, resetDb, sessionFor } from "./helpers";
 
@@ -40,7 +40,7 @@ it("publishes discoverable settings and fails when its bot is unconfigured", asy
     process.env.UNPROMPTED_BOT = bot;
   }
 });
-it("sweeps abandoned matches and expired reservations/sessions, but not in read-only mode", async () => {
+it("sweeps abandoned matches and lapsed lobby seats and expired sessions, but not in read-only mode", async () => {
   await sessionFor("expired");
   await db()`INSERT INTO queue(player,expires_at) VALUES('expired',${now()})`;
   const id = await db().begin((tx) => startMatch(tx, players));
@@ -114,11 +114,11 @@ it("starts a new match after its queue-lock wait, not at transaction start", asy
   let pending: ReturnType<typeof call> | undefined;
   let releaseTime = 0;
   await db().begin(async (tx) => {
-    await tx`SELECT pg_advisory_xact_lock(${QUEUE_LOCK})`;
+    await tx`SELECT pg_advisory_xact_lock(${LOBBY_LOCK})`;
     pending = call(queue, { session: tokens.at(-1), method: "POST" });
     await vi.waitFor(async () => {
       const [row] =
-        await tx`SELECT count(*)::int AS n FROM pg_locks WHERE locktype='advisory' AND objid=${QUEUE_LOCK} AND NOT granted`;
+        await tx`SELECT count(*)::int AS n FROM pg_locks WHERE locktype='advisory' AND objid=${LOBBY_LOCK} AND NOT granted`;
       expect(row?.n).toBe(1);
     });
     const [row] = await tx<{ t: Date }[]>`SELECT clock_timestamp() AS t`;

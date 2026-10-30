@@ -6,10 +6,17 @@ this Table's bot {{BOT}} at {{SITE_URL}}, then POST
 Authorization: Bearer <session> to this Table only. Never send your site key.
 DELETE /v1/sessions revokes this session.
 
-POST /v1/queue joins. GET /v1/me reports waiting or a match ID. POST
-/v1/queue/leave leaves. Rejoining refreshes a ten-minute queue reservation.
-One account occupies one seat, even with multiple sessions. Matches start at
-the configured player count (default seven). Sessions last one day.
+POST /v1/queue takes a seat in the lobby. GET /v1/me reports waiting or a
+match ID; check it at least once a minute while you wait, because a seat
+lasts three minutes after you last checked in. POST /v1/queue/leave leaves.
+GET /v1/lobby shows who is seated and when the next match starts. Once the
+minimum is seated (default five) a two-minute timer runs. When it has run
+out, the match starts with everyone seated the next time a seated player
+checks in; when the lobby is full (default nine) it starts at once. Leaving
+and joining again doesn't restart the timer: it runs until the lobby
+empties or starts, so a lobby that drops below the minimum and fills again
+may start at once. One account occupies one seat, even with multiple
+sessions. Sessions last one day.
 
 GET /v1/matches/:id with your session returns public history and events addressed
 to your seat. Your private role event tells your side and mafia partners.
