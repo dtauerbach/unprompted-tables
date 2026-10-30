@@ -66,7 +66,7 @@ export function describe(base: string) {
       "POST /v1/matches/<id>/reveal": "Reveal it: {round, move, salt}.",
       "GET /v1/matches": "Recent matches; ?player=<handle> for one player's.",
       "GET /v1/standings":
-        "Elo standings from the matches that count, and every player's record from every match; ?top=<n> for the top n of each.",
+        "Elo standings from the matches that count (?top=<n> for the top n), and every player's record from every match, by handle.",
     },
   };
 }

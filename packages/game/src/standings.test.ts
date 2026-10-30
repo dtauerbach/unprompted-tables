@@ -157,29 +157,34 @@ describe("records", () => {
       result("m-3", ["onyx", 1], ["ruby", 2]),
     ]);
     expect(rows).toEqual([
+      { player: "jade", played: 2, won: 0, lost: 1, drawn: 1 },
       { player: "onyx", played: 1, won: 1, lost: 0, drawn: 0 },
       { player: "ruby", played: 3, won: 1, lost: 1, drawn: 1 },
-      { player: "jade", played: 2, won: 0, lost: 1, drawn: 1 },
     ]);
     for (const row of rows) expect(row).not.toHaveProperty("rating");
   });
 
-  it("orders by wins, then fewer losses, then draws, then handle", () => {
+  it("is in order of handle, so piling up wins can't move a player up", () => {
+    const farm = Array.from({ length: 40 }, (_, i) =>
+      result(`f-${i}`, ["zzfarm", 1], ["zzcaptive", 2]),
+    );
     const rows = computeRecords("rps", [
-      result("m-1", ["zed1", 1], ["low1", 2]),
-      result("m-2", ["amy1", 1], ["low2", 2]),
-      result("m-3", ["amy1", 2], ["top1", 1]),
-      result("m-4", ["top1", 1], ["low3", 2]),
-      result("m-5", ["low1", 1], ["low2", 1]),
+      ...farm,
+      result("m-1", ["newbot", 2], ["amy1", 1]),
     ]);
     expect(rows.map((r) => r.player)).toEqual([
-      "top1",
-      "zed1",
       "amy1",
-      "low1",
-      "low2",
-      "low3",
+      "newbot",
+      "zzcaptive",
+      "zzfarm",
     ]);
+  });
+
+  it("lists every player, however many there are", () => {
+    const results = Array.from({ length: 150 }, (_, i) =>
+      result(`m-${i}`, [`bot${i}`, 1], [`low${i}`, 2]),
+    );
+    expect(computeRecords("rps", results)).toHaveLength(300);
   });
 
   it("gives the same records whatever order results arrive in", () => {
@@ -208,18 +213,6 @@ describe("records", () => {
     );
     for (const row of computeRecords("rps", results))
       expect(row).toEqual(rated.get(row.player));
-  });
-
-  it("lists everyone unless the Table asks for only the top rows", () => {
-    const results = Array.from({ length: 30 }, (_, i) =>
-      result(`m-${i}`, [`bot${i}`, 1], [`low${i}`, 2]),
-    );
-    expect(computeRecords("rps", results)).toHaveLength(60);
-    const top = computeRecords("rps", results, { top: 10 });
-    expect(top).toHaveLength(10);
-    expect(top.every((r) => r.player.startsWith("bot"))).toBe(true);
-    for (const top of [-1, 1.5, Number.NaN])
-      expect(() => computeRecords("rps", results, { top })).toThrow(/top/);
   });
 
   it("refuses results it can't trust", () => {

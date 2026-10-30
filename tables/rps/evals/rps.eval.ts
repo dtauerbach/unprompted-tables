@@ -241,7 +241,7 @@ describe("rock paper scissors through Unprompted", () => {
       drawn: 0,
     });
     expect(record(opal.handle)).toMatchObject({ played: 1, lost: 1 });
-    expect(board.counts).toContain("hours old");
+    expect(board.standings.counts).toContain("hours old");
   });
 
   it("lets a player end a session that leaked", async () => {

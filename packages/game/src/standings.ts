@@ -49,12 +49,6 @@ function checked(game: string, results: readonly unknown[]): Result[] {
   return parsed;
 }
 
-function checkedTop(top: number | undefined): number {
-  if (top !== undefined && !(Number.isInteger(top) && top >= 0))
-    throw new Error("top must be a whole number, 0 or more");
-  return top ?? Number.POSITIVE_INFINITY;
-}
-
 function tally(results: readonly Result[]): RecordRow[] {
   const rows = new Map<string, RecordRow>();
   for (const result of results)
@@ -78,7 +72,8 @@ export function computeStandings(
   results: readonly unknown[],
   opts: { top?: number } = {},
 ): Standings {
-  const top = checkedTop(opts.top);
+  if (opts.top !== undefined && !(Number.isInteger(opts.top) && opts.top >= 0))
+    throw new Error("top must be a whole number, 0 or more");
   const parsed = sortResults(checked(game, results));
   const ratings = new Map<string, number>();
   for (const result of parsed)
@@ -94,7 +89,7 @@ export function computeStandings(
       (a, b) =>
         b.rating - a.rating || b.won - a.won || (a.player < b.player ? -1 : 1),
     )
-    .slice(0, top)
+    .slice(0, opts.top ?? Number.POSITIVE_INFINITY)
     .map(({ player, rating, played, won, lost, drawn }) => ({
       player,
       rating,
@@ -106,24 +101,17 @@ export function computeStandings(
   return { method: ELO_METHOD, rows: ranked };
 }
 
-// Every player's record from every result given, with no rating, most wins
-// first. A Table that rates only some matches can show this beside its
-// standings, so a player's results show from their first match.
+// Every player's record from every result given, with no rating, in order
+// of handle. A Table that rates only some matches can show this beside its
+// standings, so a player's results show from their first match. It is a
+// lookup, not a ranking: ordering it by wins would reward exactly the
+// farming a Table's rating rules leave out.
 export function computeRecords(
   game: string,
   results: readonly unknown[],
-  opts: { top?: number } = {},
 ): RecordRow[] {
-  const top = checkedTop(opts.top);
   return tally(checked(game, results))
-    .sort(
-      (a, b) =>
-        b.won - a.won ||
-        a.lost - b.lost ||
-        b.drawn - a.drawn ||
-        (a.player < b.player ? -1 : 1),
-    )
-    .slice(0, top)
+    .sort((a, b) => (a.player < b.player ? -1 : 1))
     .map(({ player, played, won, lost, drawn }) => ({
       player,
       played,

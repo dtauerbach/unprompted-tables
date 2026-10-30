@@ -1,6 +1,8 @@
 import { type Result, sealOf } from "@unprompted-tables/game";
 import { db } from "@unprompted-tables/server";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import Home from "@/app/page";
 import { POST as commitRoute } from "@/app/v1/matches/[id]/commit/route";
 import { POST as revealRoute } from "@/app/v1/matches/[id]/reveal/route";
 import { POST as queueRoute } from "@/app/v1/queue/route";
@@ -184,7 +186,7 @@ describe("farming the standings", () => {
         { player: "fresh", played: 1, won: 1, lost: 0, drawn: 0 },
         { player: "ruby", played: 1, won: 0, lost: 1, drawn: 0 },
       ]);
-      expect(first.counts).toContain("records list every finished match");
+      expect(first.standings.counts).toContain("never counts");
       // The site said when the account was made, once; later passes don't
       // change it.
       site.setAnswer((handle) => ({
@@ -216,20 +218,22 @@ describe("farming the standings", () => {
     const { standings: s, records } = await board();
     expect(s.rows[0]).toMatchObject({ player: "ruby", played: 3 });
     expect(records).toEqual([
-      { player: "ruby", played: 5, won: 5, lost: 0, drawn: 0 },
       { player: "jade", played: 5, won: 0, lost: 5, drawn: 0 },
+      { player: "ruby", played: 5, won: 5, lost: 0, drawn: 0 },
     ]);
     // Records carry no rating, so they can't be read as one.
     for (const row of records) expect(row).not.toHaveProperty("rating");
   });
 
-  it("cuts the records to the top n too", async () => {
+  it("cuts the standings to the top n but never the records", async () => {
     const a = { handle: "ruby", session: await sessionFor("ruby") };
     const b = { handle: "jade", session: await sessionFor("jade") };
     await playMatch(a, b);
     const { standings: s, records } = await board("?top=1");
-    expect(s.rows).toHaveLength(1);
+    expect(s.rows).toMatchObject([{ player: "ruby" }]);
+    // jade lost, so is last in the standings, and still finds itself.
     expect(records).toEqual([
+      { player: "jade", played: 1, won: 0, lost: 1, drawn: 0 },
       { player: "ruby", played: 1, won: 1, lost: 0, drawn: 0 },
     ]);
   });
@@ -246,8 +250,56 @@ describe("farming the standings", () => {
     expect(res.body.rating.counts).toContain(
       `${SETTINGS.rating.pair_matches_per_day} matches between the same two players`,
     );
-    expect(res.body.rating.counts).toBe((await board()).counts);
+    expect(res.body.rating.counts).toBe((await board()).standings.counts);
     expect(res.body.endpoints["GET /v1/standings"]).toContain("record");
+  });
+});
+
+// The page people read: React escapes every handle, and the words say why
+// the standings can be empty while matches have been played.
+describe("the Table's page", () => {
+  beforeEach(resetDb);
+  const page = async () => renderToStaticMarkup(await Home());
+
+  it("says nothing has been played before any match", async () => {
+    const html = await page();
+    expect(html.match(/No finished matches yet\./g)).toHaveLength(2);
+    expect(html).not.toContain("No matches count yet");
+  });
+
+  it("shows a new bot's match in the records and says why it isn't rated", async () => {
+    const site = fakeSite();
+    try {
+      site.setAnswer((handle) => ({
+        bot: holderOf(handle, {
+          is_new: true,
+          created_at: new Date().toISOString(),
+        }),
+      }));
+      await playMatch(await join(site, "fresh"), await join(site, "newer"));
+    } finally {
+      site.restore();
+    }
+    const html = await page();
+    expect(html).toContain("No matches count yet");
+    expect(html).toContain("never counts");
+    const records = html.slice(html.indexOf("<h2>Records</h2>"));
+    expect(records).toContain("<td>@fresh</td><td>1</td><td>1</td><td>0</td>");
+    expect(records).toContain("<td>@newer</td><td>1</td><td>0</td><td>1</td>");
+  });
+
+  it("shows rated players with how many matches counted", async () => {
+    const a = { handle: "ruby", session: await sessionFor("ruby") };
+    const b = { handle: "jade", session: await sessionFor("jade") };
+    for (let i = 0; i < 4; i++) await playMatch(a, b);
+    const html = await page();
+    expect(html).not.toContain("No matches count yet");
+    const [standings, records] = html.split("<h2>Records</h2>");
+    // Three counted that day; the records keep all four.
+    expect(standings).toMatch(
+      /<td>@ruby<\/td><td>\d+<\/td><td>3<\/td><td>3<\/td>/,
+    );
+    expect(records).toContain("<td>@ruby</td><td>4</td><td>4</td>");
   });
 });
 

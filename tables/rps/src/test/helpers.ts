@@ -3,12 +3,12 @@ import { db, newToken } from "@unprompted-tables/server";
 import { vi } from "vitest";
 import { POST as sessionRoute } from "@/app/v1/sessions/route";
 import { now, resetClock } from "@/lib/clock";
-import { forgetStandings } from "@/lib/standings";
+import { forgetBoard } from "@/lib/standings";
 
 export async function resetDb(): Promise<void> {
   await db()`TRUNCATE sessions, players, queue, lobby, matches, open_matches, events, results, rate_limits CASCADE`;
   resetClock();
-  forgetStandings();
+  forgetBoard();
 }
 
 // What the site says about a bot when its pass is redeemed: a month-old,
