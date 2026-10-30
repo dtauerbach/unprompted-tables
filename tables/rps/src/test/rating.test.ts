@@ -132,8 +132,9 @@ async function playMatch(a: P, b: P): Promise<void> {
   }
 }
 
-const standings = async () =>
-  (await call(standingsRoute, { path: "/v1/standings" })).body.standings;
+const board = async (query = "") =>
+  (await call(standingsRoute, { path: `/v1/standings${query}` })).body;
+const standings = async () => (await board()).standings;
 
 describe("farming the standings", () => {
   beforeEach(resetDb);
@@ -177,6 +178,13 @@ describe("farming the standings", () => {
       const fresh = await join(site, "fresh");
       await playMatch(fresh, await join(site, "ruby"));
       expect((await standings()).rows).toEqual([]);
+      // The match still shows in the records, and counts says why it isn't rated.
+      const first = await board();
+      expect(first.records).toEqual([
+        { player: "fresh", played: 1, won: 1, lost: 0, drawn: 0 },
+        { player: "ruby", played: 1, won: 0, lost: 1, drawn: 0 },
+      ]);
+      expect(first.counts).toContain("records list every finished match");
       // The site said when the account was made, once; later passes don't
       // change it.
       site.setAnswer((handle) => ({
@@ -191,9 +199,46 @@ describe("farming the standings", () => {
       moveClock(DAY + 1000);
       await playMatch(await join(site, "fresh"), await join(site, "ruby"));
       expect((await standings()).rows).toHaveLength(2);
+      // The records keep both matches, the rated one and the one before.
+      expect((await board()).records).toMatchObject([
+        { player: "fresh", played: 2, won: 2 },
+        { player: "ruby", played: 2, lost: 2 },
+      ]);
     } finally {
       site.restore();
     }
+  });
+
+  it("keeps every farmed match in the records, though only a few are rated", async () => {
+    const a = { handle: "ruby", session: await sessionFor("ruby") };
+    const b = { handle: "jade", session: await sessionFor("jade") };
+    for (let i = 0; i < 5; i++) await playMatch(a, b);
+    const { standings: s, records } = await board();
+    expect(s.rows[0]).toMatchObject({ player: "ruby", played: 3 });
+    expect(records).toEqual([
+      { player: "ruby", played: 5, won: 5, lost: 0, drawn: 0 },
+      { player: "jade", played: 5, won: 0, lost: 5, drawn: 0 },
+    ]);
+    // Records carry no rating, so they can't be read as one.
+    for (const row of records) expect(row).not.toHaveProperty("rating");
+  });
+
+  it("cuts the records to the top n too", async () => {
+    const a = { handle: "ruby", session: await sessionFor("ruby") };
+    const b = { handle: "jade", session: await sessionFor("jade") };
+    await playMatch(a, b);
+    const { standings: s, records } = await board("?top=1");
+    expect(s.rows).toHaveLength(1);
+    expect(records).toEqual([
+      { player: "ruby", played: 1, won: 1, lost: 0, drawn: 0 },
+    ]);
+  });
+
+  it("answers with empty standings and records before any match", async () => {
+    expect(await board()).toMatchObject({
+      standings: { rows: [] },
+      records: [],
+    });
   });
 
   it("is in the Table's description", async () => {
@@ -201,6 +246,8 @@ describe("farming the standings", () => {
     expect(res.body.rating.counts).toContain(
       `${SETTINGS.rating.pair_matches_per_day} matches between the same two players`,
     );
+    expect(res.body.rating.counts).toBe((await board()).counts);
+    expect(res.body.endpoints["GET /v1/standings"]).toContain("record");
   });
 });
 

@@ -1,4 +1,5 @@
 import { ELO_METHOD } from "@unprompted-tables/game";
+import { COUNTS } from "./rating";
 import { MOVES } from "./rules";
 import { GAME, SETTINGS } from "./settings";
 
@@ -48,7 +49,7 @@ export function describe(base: string) {
     lobby: SETTINGS.lobby,
     rating: {
       method: ELO_METHOD,
-      counts: `A match counts toward the standings when both players' Unprompted accounts were at least ${SETTINGS.rating.account_age_seconds / 3600} hours old when it ended, and only the first ${SETTINGS.rating.pair_matches_per_day} matches between the same two players in any 24 hours count. Every match keeps its result either way.`,
+      counts: COUNTS,
       standings: `${base}/v1/standings`,
     },
     endpoints: {
@@ -64,7 +65,8 @@ export function describe(base: string) {
       "POST /v1/matches/<id>/commit": "Seal a move: {round, seal}.",
       "POST /v1/matches/<id>/reveal": "Reveal it: {round, move, salt}.",
       "GET /v1/matches": "Recent matches; ?player=<handle> for one player's.",
-      "GET /v1/standings": "Elo standings; ?top=<n> for the top n.",
+      "GET /v1/standings":
+        "Elo standings from the matches that count, and every player's record from every match; ?top=<n> for the top n of each.",
     },
   };
 }

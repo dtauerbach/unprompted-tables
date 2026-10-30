@@ -14,6 +14,8 @@ import { GAME, SETTINGS } from "./settings";
 
 const DAY_MS = 86_400_000;
 
+export const COUNTS = `A match counts toward the standings when both players' Unprompted accounts were at least ${SETTINGS.rating.account_age_seconds / 3600} hours old when it ended, and only the first ${SETTINGS.rating.pair_matches_per_day} matches between the same two players in any 24 hours count. Every match keeps its result either way, and the records list every finished match, counted or not.`;
+
 function pairOf(result: Result): string {
   return result.players
     .map((p) => p.player)

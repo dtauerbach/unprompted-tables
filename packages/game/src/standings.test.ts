@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ELO_START } from "./elo";
 import type { Result } from "./result";
-import { computeStandings, ELO_METHOD } from "./standings";
+import { computeRecords, computeStandings, ELO_METHOD } from "./standings";
 
 let clock = 0;
 function result(match: string, ...places: [string, number][]): Result {
@@ -142,5 +142,92 @@ describe("standings", () => {
       computeStandings("rps", [{ ...one, players: [one.players[0]] }]),
     ).toThrow();
     expect(() => computeStandings("rps", [{ nonsense: true }])).toThrow();
+  });
+});
+
+describe("records", () => {
+  it("is empty before any match", () => {
+    expect(computeRecords("rps", [])).toEqual([]);
+  });
+
+  it("counts every match each player played, with no rating", () => {
+    const rows = computeRecords("rps", [
+      result("m-1", ["ruby", 1], ["jade", 2]),
+      result("m-2", ["ruby", 1], ["jade", 1]),
+      result("m-3", ["onyx", 1], ["ruby", 2]),
+    ]);
+    expect(rows).toEqual([
+      { player: "onyx", played: 1, won: 1, lost: 0, drawn: 0 },
+      { player: "ruby", played: 3, won: 1, lost: 1, drawn: 1 },
+      { player: "jade", played: 2, won: 0, lost: 1, drawn: 1 },
+    ]);
+    for (const row of rows) expect(row).not.toHaveProperty("rating");
+  });
+
+  it("orders by wins, then fewer losses, then draws, then handle", () => {
+    const rows = computeRecords("rps", [
+      result("m-1", ["zed1", 1], ["low1", 2]),
+      result("m-2", ["amy1", 1], ["low2", 2]),
+      result("m-3", ["amy1", 2], ["top1", 1]),
+      result("m-4", ["top1", 1], ["low3", 2]),
+      result("m-5", ["low1", 1], ["low2", 1]),
+    ]);
+    expect(rows.map((r) => r.player)).toEqual([
+      "top1",
+      "zed1",
+      "amy1",
+      "low1",
+      "low2",
+      "low3",
+    ]);
+  });
+
+  it("gives the same records whatever order results arrive in", () => {
+    const results = Array.from({ length: 60 }, (_, i) =>
+      result(
+        `m-${i}`,
+        [`bot${i % 7}`, 1 + (i % 2)],
+        [`bot${(i + 3) % 7}`, 2 - (i % 2)],
+      ),
+    );
+    const first = computeRecords("rps", results);
+    for (const seed of [1, 2, 3])
+      expect(computeRecords("rps", shuffle(results, seed))).toEqual(first);
+  });
+
+  it("matches the standings' counts for the same results", () => {
+    const results = [
+      result("m-1", ["ruby", 1], ["jade", 2]),
+      result("m-2", ["jade", 1], ["onyx", 1], ["ruby", 3]),
+    ];
+    const rated = new Map(
+      computeStandings("rps", results).rows.map(({ rating, ...r }) => [
+        r.player,
+        r,
+      ]),
+    );
+    for (const row of computeRecords("rps", results))
+      expect(row).toEqual(rated.get(row.player));
+  });
+
+  it("lists everyone unless the Table asks for only the top rows", () => {
+    const results = Array.from({ length: 30 }, (_, i) =>
+      result(`m-${i}`, [`bot${i}`, 1], [`low${i}`, 2]),
+    );
+    expect(computeRecords("rps", results)).toHaveLength(60);
+    const top = computeRecords("rps", results, { top: 10 });
+    expect(top).toHaveLength(10);
+    expect(top.every((r) => r.player.startsWith("bot"))).toBe(true);
+    for (const top of [-1, 1.5, Number.NaN])
+      expect(() => computeRecords("rps", results, { top })).toThrow(/top/);
+  });
+
+  it("refuses results it can't trust", () => {
+    const one = result("m-1", ["ruby", 1], ["jade", 2]);
+    expect(() => computeRecords("rps", [one, one])).toThrow(/twice/);
+    expect(() => computeRecords("rps", [{ ...one, game: "chess" }])).toThrow(
+      /not rps/,
+    );
+    expect(() => computeRecords("rps", [{ nonsense: true }])).toThrow();
   });
 });
