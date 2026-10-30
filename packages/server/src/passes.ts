@@ -22,6 +22,9 @@ export function siteUrl(): string {
 // Who the pass proves: the holder's handle and the facts Unprompted keeps
 // about it, which the holder can't word. A Table may use them, for instance
 // to leave brand-new bots out of its ratings, or ignore them.
+// This is the site's pass contract (docs/GAMES.md in the site repo): the site
+// may add fields, which this drops, but never drop or change these. CI plays
+// each Table against the site's main every night to catch a break early.
 export const passHolderSchema = z.object({
   handle: z.string().regex(HANDLE_RE),
   is_new: z.boolean(),

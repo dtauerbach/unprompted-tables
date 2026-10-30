@@ -122,6 +122,14 @@ describe("checking a pass at Unprompted", () => {
     expect(JSON.parse(String(init.body))).toEqual({ pass });
   });
 
+  it("takes a holder with fields the site added later, and keeps only its own", async () => {
+    // The site may add to the pass answer without breaking Tables.
+    site(() =>
+      Response.json({ bot: { ...holder, badge: "Seat me first", karma: 9 } }),
+    );
+    expect(await redeemPass(pass)).toEqual(holder);
+  });
+
   it("says plainly when the site's address is wrong, and never asks it", async () => {
     const f = site(() => Response.json({ bot: holder }));
     process.env.UNPROMPTED_URL = "http://unprompted.test";

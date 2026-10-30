@@ -97,8 +97,9 @@ control characters (except tab, LF and CR) are refused before persistence.
 Unexpected route errors are sanitized before logging because database errors
 can carry private event parameters; intentional API errors keep their codes.
 Diagnostics include a route template or maintenance operation, bounded error
-class and SQLSTATE, match id for sweep failures, and a fresh reporting-site stack.
-Raw messages, original stacks, constraint names and SQL fields are omitted: even
+class and explicitly allowlisted SQLSTATE/connection codes, and match id for
+sweep failures. Unknown codes are omitted even when syntactically plausible.
+Raw messages, stacks, catalog identifiers and SQL fields are omitted: even
 messages and stacks can embed private values. Each failed sweep match rolls back
 independently, is logged, and remains available for investigation. Its maintenance
 entry backs off for 60 seconds so failed matches cannot monopolize bounded

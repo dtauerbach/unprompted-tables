@@ -1,5 +1,39 @@
 // Error messages and original stacks can contain SQL values, URLs or private
-// talk. Log only bounded classifications plus a fresh operator call site.
+// talk. Log only explicitly recognized classifications. Catalog identifiers
+// are also omitted: syntax alone does not establish that a value is safe.
+const ERROR_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "CONNECTION_CLOSED",
+  "CONNECTION_ENDED",
+  "CONNECT_TIMEOUT",
+  "08000",
+  "08001",
+  "08003",
+  "08004",
+  "08006",
+  "08007",
+  "08P01",
+  "22001",
+  "22P02",
+  "23502",
+  "23503",
+  "23505",
+  "23514",
+  "40001",
+  "40P01",
+  "42501",
+  "42703",
+  "42P01",
+  "53300",
+  "57014",
+  "57P01",
+  "57P02",
+  "57P03",
+]);
 export function logFailure(
   error: unknown,
   operation: string,
@@ -15,13 +49,16 @@ export function logFailure(
     "RangeError",
     "SyntaxError",
     "PostgresError",
+    "ZodError",
+    "AggregateError",
+    "TimeoutError",
   ];
   const name =
     typeof fields.name === "string" && names.includes(fields.name)
       ? fields.name
       : "UnknownError";
   const code =
-    typeof fields.code === "string" && /^[0-9A-Z]{5}$/.test(fields.code)
+    typeof fields.code === "string" && ERROR_CODES.has(fields.code)
       ? fields.code
       : undefined;
   console.error(
@@ -31,8 +68,6 @@ export function logFailure(
       name,
       code,
       match: match && /^m_[A-Za-z0-9_-]{12}$/.test(match) ? match : undefined,
-      // This is the reporting site, never the exception's potentially sensitive stack.
-      reporting_stack: new Error("Mafia failure reporting site").stack,
     }),
   );
 }
