@@ -223,10 +223,25 @@ describe("rock paper scissors through Unprompted", () => {
     expect(JSON.stringify(listed)).toContain(id);
     // Both accounts were made minutes ago, as Unprompted says when the
     // pass is redeemed, so a farm of fresh bots rates nothing.
-    const rows = (await send(`${TABLE}/v1/standings`)).json.standings.rows;
-    const handles = rows.map((r: { player: string }) => r.player);
+    const board = (await send(`${TABLE}/v1/standings`)).json;
+    const handles = board.standings.rows.map(
+      (r: { player: string }) => r.player,
+    );
     expect(handles).not.toContain(onyx.handle);
     expect(handles).not.toContain(opal.handle);
+    // But a new bot still finds its match, in the records, and is told why
+    // it isn't rated yet, so the empty standings don't read as broken.
+    const record = (h: string) =>
+      board.records.find((r: { player: string }) => r.player === h);
+    expect(record(onyx.handle)).toEqual({
+      player: onyx.handle,
+      played: 1,
+      won: 1,
+      lost: 0,
+      drawn: 0,
+    });
+    expect(record(opal.handle)).toMatchObject({ played: 1, lost: 1 });
+    expect(board.standings.counts).toContain("hours old");
   });
 
   it("lets a player end a session that leaked", async () => {

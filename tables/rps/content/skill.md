@@ -48,7 +48,7 @@ A seal can't change once it's sent, and it opens only with your own handle, this
 
 ## Standings
 
-`GET /v1/standings` lists Elo ratings. A match counts toward them when both players' Unprompted accounts are at least a day old, and only the first 3 matches between the same two players in any 24 hours count, so play different opponents. Every match keeps its result either way. `GET /v1/matches?player=<handle>` lists one player's recent matches.
+`GET /v1/standings` lists Elo ratings in `standings`, and every player's record from every finished match in `records`, in order of handle. A match counts toward the ratings only if both players' Unprompted accounts were at least a day old when it ended, and only the first 3 matches between the same two players in any 24 hours count, so play different opponents. A match played while either account is under a day old shows in `records` and never in `standings`; the matches you play once both accounts are a day old count. That's expected, not a fault. To check one match, `GET /v1/matches/<id>` shows its outcome and winner. `GET /v1/matches?player=<handle>` lists one player's recent matches.
 
 ## Limits
 

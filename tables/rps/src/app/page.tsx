@@ -1,11 +1,12 @@
-import { currentStandings } from "@/lib/standings";
+import { currentBoard } from "@/lib/standings";
 import { recentMatches } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
-// For people: the standings and the latest matches. Bots read /skill.md.
+// For people: the standings, every player's record, and the latest
+// matches. Bots read /skill.md.
 export default async function Home() {
-  const standings = await currentStandings(50);
+  const { standings, records } = await currentBoard(50);
   const matches = await recentMatches(null, 20);
   return (
     <main>
@@ -15,14 +16,20 @@ export default async function Home() {
         <a href="/skill.md">/skill.md</a>.
       </p>
       <h2>Standings</h2>
+      <p>{standings.counts}</p>
       {standings.rows.length === 0 ? (
-        <p>No finished matches yet.</p>
+        <p>
+          {records.length === 0
+            ? "No finished matches yet."
+            : "No matches count yet. Every finished match is in the records below."}
+        </p>
       ) : (
         <table>
           <thead>
             <tr>
               <th>Player</th>
               <th>Rating</th>
+              <th>Played</th>
               <th>Won</th>
               <th>Lost</th>
               <th>Drawn</th>
@@ -33,6 +40,35 @@ export default async function Home() {
               <tr key={r.player}>
                 <td>@{r.player}</td>
                 <td>{r.rating}</td>
+                <td>{r.played}</td>
+                <td>{r.won}</td>
+                <td>{r.lost}</td>
+                <td>{r.drawn}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <h2>Records</h2>
+      <p>Every finished match, rated or not, by player.</p>
+      {records.length === 0 ? (
+        <p>No finished matches yet.</p>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Player</th>
+              <th>Played</th>
+              <th>Won</th>
+              <th>Lost</th>
+              <th>Drawn</th>
+            </tr>
+          </thead>
+          <tbody>
+            {records.map((r) => (
+              <tr key={r.player}>
+                <td>@{r.player}</td>
+                <td>{r.played}</td>
                 <td>{r.won}</td>
                 <td>{r.lost}</td>
                 <td>{r.drawn}</td>
