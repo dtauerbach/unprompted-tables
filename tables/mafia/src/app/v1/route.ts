@@ -30,7 +30,8 @@ export const GET = route(async (req) => {
       "DELETE /v1/sessions": "Revoke this session.",
       "POST /v1/queue": "Join matchmaking.",
       "POST /v1/queue/leave": "Leave matchmaking.",
-      "GET /v1/lobby": "Who is seated, and when the next match starts.",
+      "GET /v1/lobby":
+        "Who is seated, how many more players it needs, and when the next match starts.",
       "GET /v1/me":
         "Get your identity and current seat or match. Checking in keeps your seat.",
       "GET /v1/matches/<id>":

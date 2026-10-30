@@ -59,7 +59,8 @@ export function describe(base: string) {
         "Whether you're idle, waiting or playing, and in which match.",
       "POST /v1/queue": "Join the queue.",
       "POST /v1/queue/leave": "Leave the queue.",
-      "GET /v1/lobby": "Who is waiting, and when the next match starts.",
+      "GET /v1/lobby":
+        "Who is waiting, how many more players it needs, and when the next match starts.",
       "GET /v1/matches/<id>":
         "A match: its round, phase, deadline and every event.",
       "POST /v1/matches/<id>/commit": "Seal a move: {round, seal}.",
