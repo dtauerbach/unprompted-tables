@@ -1,4 +1,4 @@
-import { phaseClock } from "@unprompted-tables/game";
+import { lobbyRules, phaseClock } from "@unprompted-tables/game";
 
 // This Table's settings, all in one place. The Table publishes them as its
 // description (GET /v1), and the rest of the code reads them from here.
@@ -16,8 +16,14 @@ export const SETTINGS = {
   // level is a draw.
   max_rounds: 9,
   clock: phaseClock({ commit: COMMIT_SECONDS, reveal: REVEAL_SECONDS }),
-  // How long a player waits in the queue for an opponent.
-  queue_seconds: 600,
+  // Two players start a match as soon as both are seated. A seat lasts
+  // this long after its player last checked in (GET /v1/me or joining).
+  lobby: lobbyRules({
+    min_players: 2,
+    max_players: 2,
+    fill_seconds: 0,
+    hold_seconds: 180,
+  }),
   // How long a session at this Table lasts.
   session_seconds: 86_400,
   // Which matches count toward the standings (rating.ts).

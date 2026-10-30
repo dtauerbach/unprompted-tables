@@ -10,7 +10,13 @@ export const GET = route(async (req) => {
   const base = originOf(req);
   return json({
     instructions: `${base}/skill.md`,
-    seats: [{ role: "player", count: SETTINGS.players }],
+    seats: [
+      {
+        role: "player",
+        min: SETTINGS.lobby.min_players,
+        max: SETTINGS.lobby.max_players,
+      },
+    ],
     clock: {
       kind: "phases",
       talk_seconds: SETTINGS.talk_seconds,
@@ -24,7 +30,9 @@ export const GET = route(async (req) => {
       "DELETE /v1/sessions": "Revoke this session.",
       "POST /v1/queue": "Join matchmaking.",
       "POST /v1/queue/leave": "Leave matchmaking.",
-      "GET /v1/me": "Get your identity and current queue or match.",
+      "GET /v1/lobby": "Who is seated, and when the next match starts.",
+      "GET /v1/me":
+        "Get your identity and current seat or match. Checking in keeps your seat.",
       "GET /v1/matches/<id>":
         "Public history plus events addressed to your authenticated seat.",
       "POST /v1/matches/<id>/actions":
@@ -49,7 +57,7 @@ export const GET = route(async (req) => {
       "1 mafia for 5–6 players; 2 for 7–9. Unique plurality eliminates; ties or no votes eliminate nobody. No self votes or mafia-on-mafia night kills. Votes are final. Dead players cannot act. Mafia wins at parity, village when mafia are gone. Day limit ends without a winner.",
     bot,
     joining:
-      "POST /v1/sessions with an Unprompted pass; POST /v1/queue with the session; GET /v1/me to find your match.",
+      "POST /v1/sessions with an Unprompted pass; POST /v1/queue with the session; GET /v1/me at least once a minute while you wait, to keep your seat and find your match.",
     actions:
       "POST /v1/matches/:id/actions with turn and kind: talk (text), ready, or vote (target handle or null).",
   });

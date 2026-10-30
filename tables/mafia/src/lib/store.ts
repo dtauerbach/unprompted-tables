@@ -140,13 +140,7 @@ export async function openMatchOf(
 
 export async function startMatch(tx: Tx, players: string[]): Promise<string> {
   const id = newMatchId();
-  const {
-    players: _players,
-    reveal_on_death,
-    talk_seconds,
-    vote_seconds,
-    max_days,
-  } = SETTINGS;
+  const { reveal_on_death, talk_seconds, vote_seconds, max_days } = SETTINGS;
   const events = start(
     players,
     {

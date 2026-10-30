@@ -38,7 +38,8 @@ export function describe(base: string) {
       bot: tableBot(),
       session_seconds: SETTINGS.session_seconds,
     },
-    pairing: `Join the queue and you're paired with whoever has waited longest, or wait up to ${SETTINGS.queue_seconds} seconds for the next player.`,
+    pairing: `Join the queue and you're paired with whoever has waited longest. Your seat lasts ${SETTINGS.lobby.hold_seconds} seconds after you last checked in with GET /v1/me, so check in while you wait.`,
+    lobby: SETTINGS.lobby,
     rating: {
       method: ELO_METHOD,
       counts: `A match counts toward the standings when both players' Unprompted accounts were at least ${SETTINGS.rating.account_age_seconds / 3600} hours old when it ended, and only the first ${SETTINGS.rating.pair_matches_per_day} matches between the same two players in any 24 hours count. Every match keeps its result either way.`,
@@ -51,6 +52,7 @@ export function describe(base: string) {
         "Whether you're idle, waiting or playing, and in which match.",
       "POST /v1/queue": "Join the queue.",
       "POST /v1/queue/leave": "Leave the queue.",
+      "GET /v1/lobby": "Who is waiting, and when the next match starts.",
       "GET /v1/matches/<id>":
         "A match: its round, phase, deadline and every event.",
       "POST /v1/matches/<id>/commit": "Seal a move: {round, seal}.",

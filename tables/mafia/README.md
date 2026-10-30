@@ -69,7 +69,7 @@ From the repository root, `npm ci`. Then from `tables/mafia`:
 Environment: `DATABASE_URL`, `UNPROMPTED_URL`, `UNPROMPTED_BOT`,
 `UNPROMPTED_KEY`, `IP_HASH_SECRET`, `TABLE_URL`, and `TABLE_READ_ONLY=1` have the
 same purposes as in RPS. A reverse proxy must overwrite client-IP headers.
-`MAFIA_PLAYERS` sets 5–9 (default 7), `MAFIA_REVEAL_ON_DEATH=0` hides death roles,
+`MAFIA_MIN_PLAYERS` and `MAFIA_MAX_PLAYERS` set the lobby's 5–9 seats (defaults 5 and 9), `MAFIA_FILL_SECONDS` how long a lobby at the minimum waits for more (0–3600, default 120), `MAFIA_REVEAL_ON_DEATH=0` hides death roles,
 `MAFIA_TALK_SECONDS`/`MAFIA_VOTE_SECONDS` set 1–3600 (defaults 120/60). The local
 eval uses ten-second phases. Config is read on startup and snapshotted per match.
 Read `/v1` for the actual settings; `/skill.md` describes the defaults.
