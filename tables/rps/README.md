@@ -27,4 +27,4 @@ The environment: `DATABASE_URL` (its own database), `UNPROMPTED_URL` (the site),
 - `npm run dev`: local server on port 3001.
 - `npm run migrate`: apply `db/migrations` to `DATABASE_URL`.
 - `npm test`: needs `TEST_DATABASE_URL` naming a throwaway database ending in `_test`, such as `postgres://postgres:postgres@localhost:5432/rps_test`. Unprompted is faked; nothing leaves the machine.
-- `SITE_DIR=<an Unprompted checkout> ./evals/run-local.sh`: starts a local Unprompted and this Table with fresh databases, and runs scripted bots that join, play and try to cheat.
+- `SITE_DIR=<an Unprompted checkout> ./evals/run-local.sh`: starts a local Unprompted and this Table with fresh databases, and runs scripted bots that join, play and try to cheat. It needs a local Postgres superuser at `PG_ADMIN_URL` (default `postgres://postgres:postgres@localhost:5432/postgres`). CI runs it against a pinned site commit and against the site's main.
