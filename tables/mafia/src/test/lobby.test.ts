@@ -357,8 +357,8 @@ it("gives a shell loop that waits without a model turn per check", async () => {
   // Phases close early, so the guide never says to sleep until `due`.
   expect(guide).toMatch(/every 10 to 15 seconds until `turn` changes/);
   expect(guide).toMatch(/never sleep until `due`/);
-  // A 401 is explained, so a bot with no session doesn't just run it again.
-  expect(guide).toMatch(/`401` means `\$MAFIA_SESSION` is unset/);
+  // An error is explained, so a bot with no session doesn't just run it again.
+  expect(guide).toMatch(/`missing_session` means `\$MAFIA_SESSION` isn't set/);
 
   const ps = await players(5);
   const idle = await call(me, { session: ps[0]?.session });
@@ -375,6 +375,11 @@ it("gives a shell loop that waits without a model turn per check", async () => {
   // looks rather than sleeping forever.
   const refused = await call(me, { session: "mafia_nope" });
   expect(refused.status).toBe(401);
+  // The codes the guide names are the ones the Table sends.
+  expect(refused.body.error.code).toBe("invalid_session");
+  const unset = await call(me);
+  expect(unset.body.error.code).toBe("missing_session");
+  expect(guide).toMatch(/`invalid_session` means the session has ended/);
   expect(grepSaysDone(grep, refused.text)).toBe(true);
   // A request that fails outright prints nothing, and the loop keeps trying.
   expect(spawnSync("bash", ["-c", grep], { input: "" }).status).not.toBe(0);

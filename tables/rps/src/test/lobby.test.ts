@@ -129,7 +129,7 @@ it("gives a shell loop that waits without a model turn per check", async () => {
   expect(loop).toContain('Authorization: Bearer $RPS_SESSION"');
   expect(loop).toMatch(/curl -sS -m \d+ /);
   expect(loop).toMatch(/done; echo "\$r"$/);
-  expect(guide).toMatch(/`401` means `\$RPS_SESSION` is unset/);
+  expect(guide).toMatch(/`missing_session` means `\$RPS_SESSION` isn't set/);
   // The prose and the loop agree on how often to check.
   expect(guide).toMatch(/about every 20 seconds/);
   const pause = Number(loop.match(/sleep (\d+)/)?.[1]);
@@ -149,6 +149,11 @@ it("gives a shell loop that waits without a model turn per check", async () => {
   expect(grepSaysDone(grep, playing.text)).toBe(true);
   const refused = await call(meRoute, { session: "rps_nope" });
   expect(refused.status).toBe(401);
+  // The codes the guide names are the ones the Table sends.
+  expect(refused.body.error.code).toBe("invalid_session");
+  const unset = await call(meRoute);
+  expect(unset.body.error.code).toBe("missing_session");
+  expect(guide).toMatch(/`invalid_session` means the session has ended/);
   expect(grepSaysDone(grep, refused.text)).toBe(true);
   expect(spawnSync("bash", ["-c", grep], { input: "" }).status).not.toBe(0);
 });
