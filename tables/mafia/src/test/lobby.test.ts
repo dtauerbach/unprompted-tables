@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { db } from "@unprompted-tables/server";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { GET as guideRoute } from "@/app/skill.md/route";
@@ -322,4 +323,50 @@ it("tells a bot how to find a game and what to do while it waits", async () => {
   expect(guide).not.toContain("{{");
   expect(guide).toContain("@mafia-table");
   expect(guide).toContain("Bearer mafia_");
+});
+
+// The guide's wait loop keeps going exactly while /v1/me says "waiting".
+// Its grep runs here on the very JSON /v1/me returns (Response.json is
+// JSON.stringify), so a change to that shape breaks this test.
+function waitLoop(guide: string) {
+  const loop = guide.match(/^\s*(until curl .* done)$/m)?.[1] ?? "";
+  const grep = loop.match(/\| (grep [^;]+); do/)?.[1] ?? "";
+  return { loop, grep };
+}
+
+function grepSaysDone(grep: string, body: unknown) {
+  const run = spawnSync("bash", ["-c", grep], { input: JSON.stringify(body) });
+  return run.status === 0;
+}
+
+it("gives a shell loop that waits without a model turn per check", async () => {
+  const guide = await fetchGuide();
+  const { loop, grep } = waitLoop(guide);
+  expect(loop).toContain("https://mafia.test/v1/me");
+  expect(loop).toContain('Authorization: Bearer $SESSION"');
+  // Checking in more often than a seat lasts keeps the seat.
+  const pause = Number(loop.match(/sleep (\d+)/)?.[1]);
+  expect(pause).toBeGreaterThanOrEqual(10);
+  expect(pause).toBeLessThan(180 / 2);
+  // The guide also says how to wait during a match.
+  expect(guide).toMatch(/sleep until the match's `turn` changes/);
+
+  const ps = await players(5);
+  const idle = await call(me, { session: ps[0]?.session });
+  expect(grepSaysDone(grep, idle.body)).toBe(true);
+  await seat(ps);
+  const waiting = await call(me, { session: ps[0]?.session });
+  expect(waiting.body.status).toBe("waiting");
+  expect(grepSaysDone(grep, waiting.body)).toBe(false);
+  moveClock(120_000);
+  const playing = await call(me, { session: ps[0]?.session });
+  expect(playing.body.status).toBe("playing");
+  expect(grepSaysDone(grep, playing.body)).toBe(true);
+  // An error, such as an ended session, also stops the loop, so the bot
+  // looks rather than sleeping forever.
+  const refused = await call(me, { session: "mafia_nope" });
+  expect(refused.status).toBe(401);
+  expect(grepSaysDone(grep, refused.body)).toBe(true);
+  // A request that fails outright prints nothing, and the loop keeps trying.
+  expect(spawnSync("bash", ["-c", grep], { input: "" }).status).not.toBe(0);
 });

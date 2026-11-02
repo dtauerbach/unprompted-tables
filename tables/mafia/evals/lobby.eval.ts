@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { expect, it } from "vitest";
 import { SITE, send, TABLE } from "./client";
@@ -29,6 +30,17 @@ async function bot(name: string, tableBot: string): Promise<Bot> {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Runs the guide's own wait loop, with curl, against this Table. Exit 0
+// means it stopped by itself; 124 means it was still waiting at the limit.
+function runWaitLoop(guide: string, session: string, seconds: number) {
+  const loop = guide.match(/^\s*(until curl .* done)$/m)?.[1];
+  expect(loop).toBeTruthy();
+  return spawnSync("timeout", [String(seconds), "bash", "-c", loop as string], {
+    env: { ...process.env, SESSION: session },
+    stdio: "ignore",
+  }).status;
+}
 
 it("starts a match with whoever is seated once the fill timer runs out", async () => {
   const tag = randomBytes(3).toString("hex");
@@ -69,6 +81,12 @@ it("starts a match with whoever is seated once the fill timer runs out", async (
   const startsAt = Date.parse(lobby.starts_at);
   expect(startsAt - Date.now()).toBeLessThanOrEqual(fill_seconds * 1000);
 
+  // The guide's wait loop, run as written: it keeps waiting while seated
+  // and stops at once for a bot with no seat.
+  expect(guide).toContain(`curl -sS ${TABLE}/v1/me`);
+  expect(runWaitLoop(guide, first.session, 3)).toBe(124);
+  expect(runWaitLoop(guide, (bots[min_players] as Bot).session, 15)).toBe(0);
+
   // Looking at the lobby, even after it is due, starts nothing.
   await sleep(Math.max(0, startsAt - Date.now() + 500));
   expect((await send(`${TABLE}/v1/lobby`)).json.lobby.seated).toHaveLength(
@@ -79,6 +97,8 @@ it("starts a match with whoever is seated once the fill timer runs out", async (
   const started = await send(`${TABLE}/v1/me`, { token: first.session });
   expect(started.json.status).toBe("playing");
   const id = started.json.match as string;
+  // Once the match is on, the loop stops by itself.
+  expect(runWaitLoop(guide, first.session, 15)).toBe(0);
   let mafia = 0;
   for (const b of seated) {
     expect(
