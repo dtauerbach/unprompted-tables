@@ -107,16 +107,16 @@ it("in read-only mode doesn't keep a seat by checking in", async () => {
 });
 
 // The guide's wait loop keeps going exactly while /v1/me says "waiting".
-// Its grep runs here on the very JSON /v1/me returns (Response.json is
-// JSON.stringify), so a change to that shape breaks this test.
+// Its grep runs here on the very text /v1/me returns, so a change to that
+// text's shape (pretty-printing, say) breaks this test.
 function waitLoop(guide: string) {
-  const loop = guide.match(/^\s*(until curl .* done)$/m)?.[1] ?? "";
+  const loop = guide.match(/^\s*(until .*)$/m)?.[1] ?? "";
   const grep = loop.match(/\| (grep [^;]+); do/)?.[1] ?? "";
   return { loop, grep };
 }
 
-function grepSaysDone(grep: string, body: unknown) {
-  const run = spawnSync("bash", ["-c", grep], { input: JSON.stringify(body) });
+function grepSaysDone(grep: string, text: string) {
+  const run = spawnSync("bash", ["-c", grep], { input: text });
   return run.status === 0;
 }
 
@@ -126,24 +126,29 @@ it("gives a shell loop that waits without a model turn per check", async () => {
   ).text();
   const { loop, grep } = waitLoop(guide);
   expect(loop).toContain("https://rps.test/v1/me");
-  expect(loop).toContain('Authorization: Bearer $SESSION"');
+  expect(loop).toContain('Authorization: Bearer $RPS_SESSION"');
+  expect(loop).toMatch(/curl -sS -m \d+ /);
+  expect(loop).toMatch(/done; echo "\$r"$/);
+  expect(guide).toMatch(/`401` means `\$RPS_SESSION` is unset/);
+  // The prose and the loop agree on how often to check.
+  expect(guide).toMatch(/about every 20 seconds/);
   const pause = Number(loop.match(/sleep (\d+)/)?.[1]);
   expect(pause).toBeGreaterThanOrEqual(5);
   expect(pause).toBeLessThan(180 / 2);
 
   const a = await player("ruby");
   const b = await player("sapphire");
-  expect(grepSaysDone(grep, (await me(a)).body)).toBe(true);
+  expect(grepSaysDone(grep, (await me(a)).text)).toBe(true);
   await queue(a);
-  const waiting = (await me(a)).body;
-  expect(waiting.status).toBe("waiting");
-  expect(grepSaysDone(grep, waiting)).toBe(false);
+  const waiting = await me(a);
+  expect(waiting.body.status).toBe("waiting");
+  expect(grepSaysDone(grep, waiting.text)).toBe(false);
   await queue(b);
-  const playing = (await me(a)).body;
-  expect(playing.status).toBe("playing");
-  expect(grepSaysDone(grep, playing)).toBe(true);
+  const playing = await me(a);
+  expect(playing.body.status).toBe("playing");
+  expect(grepSaysDone(grep, playing.text)).toBe(true);
   const refused = await call(meRoute, { session: "rps_nope" });
   expect(refused.status).toBe(401);
-  expect(grepSaysDone(grep, refused.body)).toBe(true);
+  expect(grepSaysDone(grep, refused.text)).toBe(true);
   expect(spawnSync("bash", ["-c", grep], { input: "" }).status).not.toBe(0);
 });

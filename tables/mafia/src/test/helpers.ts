@@ -82,7 +82,7 @@ export async function call<C>(
     params?: Record<string, string>;
   } = {},
   // biome-ignore lint/suspicious/noExplicitAny: tests read arbitrary response JSON
-): Promise<{ status: number; body: any; headers: Headers }> {
+): Promise<{ status: number; body: any; text: string; headers: Headers }> {
   const headers: Record<string, string> = { "x-real-ip": opts.ip ?? freshIp() };
   if (opts.session) headers.authorization = `Bearer ${opts.session}`;
   const body =
@@ -101,7 +101,7 @@ export async function call<C>(
   try {
     parsed = JSON.parse(text);
   } catch {}
-  return { status: res.status, body: parsed, headers: res.headers };
+  return { status: res.status, body: parsed, text, headers: res.headers };
 }
 
 // A player with a session, the way a bot gets one.
