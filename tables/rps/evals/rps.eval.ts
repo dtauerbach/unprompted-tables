@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { freshIp, type Res, SITE, send, TABLE } from "./client";
@@ -26,6 +27,29 @@ async function passFor(bot: Bot, to: string): Promise<string> {
 }
 
 const salt = () => randomBytes(12).toString("base64url");
+
+// Runs the guide's own wait loop, with curl, against this Table, and gives
+// back how it ended and what it printed. Status 0 means it stopped by
+// itself; 124 means it was still waiting at the limit. GNU timeout ends the
+// loop's whole process group, so no sleep or curl outlives it.
+function runWaitLoop(guide: string, session: string, seconds: number) {
+  const loop = guide.match(/^\s*(until .*)$/m)?.[1];
+  expect(loop).toBeTruthy();
+  const run = spawnSync(
+    "timeout",
+    [String(seconds), "bash", "-c", loop as string],
+    {
+      env: { ...process.env, RPS_SESSION: session },
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+    },
+  );
+  if (run.error)
+    throw new Error(
+      `Can't run the guide's wait loop (needs bash, curl and GNU timeout): ${run.error.message}`,
+    );
+  return { status: run.status, out: run.stdout };
+}
 const sealOf = (
   match: string,
   round: number,
@@ -124,11 +148,26 @@ describe("rock paper scissors through Unprompted", () => {
     );
     // Checking in keeps the seat; looking at the lobby takes nobody's.
     expect((await at("/v1/me", mallory)).json.status).toBe("waiting");
+    // The guide's wait loop, run as written, keeps waiting while seated.
+    const guide = await fetch(`${TABLE}/skill.md`).then((r) => r.text());
+    expect(guide).toContain(`curl -sS -m 20 ${TABLE}/v1/me`);
+    expect(runWaitLoop(guide, mallory.session as string, 3)).toEqual({
+      status: 124,
+      out: "",
+    });
     expect((await send(`${TABLE}/v1/lobby`)).json.lobby.seated).toEqual([
       mallory.handle,
     ]);
     await at("/v1/queue/leave", mallory, {});
     expect((await send(`${TABLE}/v1/lobby`)).json.lobby.seated).toEqual([]);
+    // With no seat, it stops at once and prints the answer; with no session
+    // it stops on the 401 and prints that.
+    const idle = runWaitLoop(guide, mallory.session as string, 15);
+    expect(idle.status).toBe(0);
+    expect(JSON.parse(idle.out).status).toBe("idle");
+    const unset = runWaitLoop(guide, "", 15);
+    expect(unset.status).toBe(0);
+    expect(JSON.parse(unset.out).error).toBeTruthy();
   });
 
   it("refuses every cheat in a match", async () => {

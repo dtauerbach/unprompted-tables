@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { db } from "@unprompted-tables/server";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { GET as guideRoute } from "@/app/skill.md/route";
@@ -322,4 +323,64 @@ it("tells a bot how to find a game and what to do while it waits", async () => {
   expect(guide).not.toContain("{{");
   expect(guide).toContain("@mafia-table");
   expect(guide).toContain("Bearer mafia_");
+});
+
+// The guide's wait loop keeps going exactly while /v1/me says "waiting".
+// Its grep runs here on the very text /v1/me returns, so a change to that
+// text's shape (pretty-printing, say) breaks this test.
+function waitLoop(guide: string) {
+  const loop = guide.match(/^\s*(until .*)$/m)?.[1] ?? "";
+  const grep = loop.match(/\| (grep [^;]+); do/)?.[1] ?? "";
+  return { loop, grep };
+}
+
+function grepSaysDone(grep: string, text: string) {
+  const run = spawnSync("bash", ["-c", grep], { input: text });
+  return run.status === 0;
+}
+
+it("gives a shell loop that waits without a model turn per check", async () => {
+  const guide = await fetchGuide();
+  const { loop, grep } = waitLoop(guide);
+  expect(loop).toContain("https://mafia.test/v1/me");
+  expect(loop).toContain('Authorization: Bearer $MAFIA_SESSION"');
+  // A stalled request gives up, and the loop prints its last answer.
+  expect(loop).toMatch(/curl -sS -m \d+ /);
+  expect(loop).toMatch(/done; echo "\$r"$/);
+  // Checking in more often than a seat lasts keeps the seat.
+  const pause = Number(loop.match(/sleep (\d+)/)?.[1]);
+  expect(pause).toBeGreaterThanOrEqual(10);
+  // Often enough that a match isn't missed for long once it starts.
+  expect(pause).toBeLessThanOrEqual(30);
+  expect(pause).toBeLessThan(180 / 2);
+  // The guide also says how to wait during a match.
+  // Phases close early, so the guide never says to sleep until `due`.
+  expect(guide).toMatch(/every 10 to 15 seconds until `turn` changes/);
+  expect(guide).toMatch(/never sleep until `due`/);
+  // An error is explained, so a bot with no session doesn't just run it again.
+  expect(guide).toMatch(/`missing_session` means `\$MAFIA_SESSION` isn't set/);
+
+  const ps = await players(5);
+  const idle = await call(me, { session: ps[0]?.session });
+  expect(grepSaysDone(grep, idle.text)).toBe(true);
+  await seat(ps);
+  const waiting = await call(me, { session: ps[0]?.session });
+  expect(waiting.body.status).toBe("waiting");
+  expect(grepSaysDone(grep, waiting.text)).toBe(false);
+  moveClock(120_000);
+  const playing = await call(me, { session: ps[0]?.session });
+  expect(playing.body.status).toBe("playing");
+  expect(grepSaysDone(grep, playing.text)).toBe(true);
+  // An error, such as an ended session, also stops the loop, so the bot
+  // looks rather than sleeping forever.
+  const refused = await call(me, { session: "mafia_nope" });
+  expect(refused.status).toBe(401);
+  // The codes the guide names are the ones the Table sends.
+  expect(refused.body.error.code).toBe("invalid_session");
+  const unset = await call(me);
+  expect(unset.body.error.code).toBe("missing_session");
+  expect(guide).toMatch(/`invalid_session` means the session has ended/);
+  expect(grepSaysDone(grep, refused.text)).toBe(true);
+  // A request that fails outright prints nothing, and the loop keeps trying.
+  expect(spawnSync("bash", ["-c", grep], { input: "" }).status).not.toBe(0);
 });

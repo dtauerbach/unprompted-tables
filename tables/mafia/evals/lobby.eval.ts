@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { expect, it } from "vitest";
 import { SITE, send, TABLE } from "./client";
@@ -30,6 +31,29 @@ async function bot(name: string, tableBot: string): Promise<Bot> {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Runs the guide's own wait loop, with curl, against this Table, and gives
+// back how it ended and what it printed. Status 0 means it stopped by
+// itself; 124 means it was still waiting at the limit. GNU timeout ends the
+// loop's whole process group, so no sleep or curl outlives it.
+function runWaitLoop(guide: string, session: string, seconds: number) {
+  const loop = guide.match(/^\s*(until .*)$/m)?.[1];
+  expect(loop).toBeTruthy();
+  const run = spawnSync(
+    "timeout",
+    [String(seconds), "bash", "-c", loop as string],
+    {
+      env: { ...process.env, MAFIA_SESSION: session },
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+    },
+  );
+  if (run.error)
+    throw new Error(
+      `Can't run the guide's wait loop (needs bash, curl and GNU timeout): ${run.error.message}`,
+    );
+  return { status: run.status, out: run.stdout };
+}
+
 it("starts a match with whoever is seated once the fill timer runs out", async () => {
   const tag = randomBytes(3).toString("hex");
   const description = (await send(`${TABLE}/v1`)).json;
@@ -44,6 +68,15 @@ it("starts a match with whoever is seated once the fill timer runs out", async (
   expect(guide).toContain("## Find a game");
   expect(guide).toContain("`needed`");
   expect((await send(`${TABLE}/v1/lobby`)).json.lobby.needed).toBe(min_players);
+  // The guide's wait loop, run as written: with no seat it stops at once and
+  // prints the answer; with no session it stops on the 401 and prints that.
+  expect(guide).toContain(`curl -sS -m 20 ${TABLE}/v1/me`);
+  const idle = runWaitLoop(guide, (bots[min_players] as Bot).session, 15);
+  expect(idle.status).toBe(0);
+  expect(JSON.parse(idle.out).status).toBe("idle");
+  const unset = runWaitLoop(guide, "", 15);
+  expect(unset.status).toBe(0);
+  expect(JSON.parse(unset.out).error).toBeTruthy();
   for (const [i, b] of seated.entries()) {
     const joined = await send(`${TABLE}/v1/queue`, {
       token: b.session,
@@ -51,6 +84,13 @@ it("starts a match with whoever is seated once the fill timer runs out", async (
     });
     expect(joined.status).toBe(202);
     expect(joined.json.lobby.needed).toBe(min_players - i - 1);
+    // Seated, it keeps waiting. This runs before the last seat, so the fill
+    // timer isn't running yet and the loop's check-in can't start a match.
+    if (i === min_players - 2)
+      expect(runWaitLoop(guide, b.session, 3)).toEqual({
+        status: 124,
+        out: "",
+      });
   }
 
   // A second session for the same account doesn't take a second seat.
@@ -79,6 +119,10 @@ it("starts a match with whoever is seated once the fill timer runs out", async (
   const started = await send(`${TABLE}/v1/me`, { token: first.session });
   expect(started.json.status).toBe("playing");
   const id = started.json.match as string;
+  // Once the match is on, the loop stops by itself and says so.
+  const on = runWaitLoop(guide, first.session, 15);
+  expect(on.status).toBe(0);
+  expect(JSON.parse(on.out)).toMatchObject({ status: "playing", match: id });
   let mafia = 0;
   for (const b of seated) {
     expect(

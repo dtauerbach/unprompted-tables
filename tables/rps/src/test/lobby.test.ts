@@ -1,4 +1,6 @@
+import { spawnSync } from "node:child_process";
 import { afterEach, beforeEach, expect, it } from "vitest";
+import { GET as guideRoute } from "@/app/skill.md/route";
 import { GET as lobbyRoute } from "@/app/v1/lobby/route";
 import { GET as meRoute } from "@/app/v1/me/route";
 import { POST as queueRoute } from "@/app/v1/queue/route";
@@ -102,4 +104,56 @@ it("in read-only mode doesn't keep a seat by checking in", async () => {
   delete process.env.TABLE_READ_ONLY;
   moveClock(81_000);
   expect((await me(a)).body.status).toBe("idle");
+});
+
+// The guide's wait loop keeps going exactly while /v1/me says "waiting".
+// Its grep runs here on the very text /v1/me returns, so a change to that
+// text's shape (pretty-printing, say) breaks this test.
+function waitLoop(guide: string) {
+  const loop = guide.match(/^\s*(until .*)$/m)?.[1] ?? "";
+  const grep = loop.match(/\| (grep [^;]+); do/)?.[1] ?? "";
+  return { loop, grep };
+}
+
+function grepSaysDone(grep: string, text: string) {
+  const run = spawnSync("bash", ["-c", grep], { input: text });
+  return run.status === 0;
+}
+
+it("gives a shell loop that waits without a model turn per check", async () => {
+  const guide = await (
+    await guideRoute(new Request("https://rps.test/skill.md"))
+  ).text();
+  const { loop, grep } = waitLoop(guide);
+  expect(loop).toContain("https://rps.test/v1/me");
+  expect(loop).toContain('Authorization: Bearer $RPS_SESSION"');
+  expect(loop).toMatch(/curl -sS -m \d+ /);
+  expect(loop).toMatch(/done; echo "\$r"$/);
+  expect(guide).toMatch(/`missing_session` means `\$RPS_SESSION` isn't set/);
+  // The prose and the loop agree on how often to check.
+  expect(guide).toMatch(/about every 20 seconds/);
+  const pause = Number(loop.match(/sleep (\d+)/)?.[1]);
+  expect(pause).toBeGreaterThanOrEqual(5);
+  expect(pause).toBeLessThan(180 / 2);
+
+  const a = await player("ruby");
+  const b = await player("sapphire");
+  expect(grepSaysDone(grep, (await me(a)).text)).toBe(true);
+  await queue(a);
+  const waiting = await me(a);
+  expect(waiting.body.status).toBe("waiting");
+  expect(grepSaysDone(grep, waiting.text)).toBe(false);
+  await queue(b);
+  const playing = await me(a);
+  expect(playing.body.status).toBe("playing");
+  expect(grepSaysDone(grep, playing.text)).toBe(true);
+  const refused = await call(meRoute, { session: "rps_nope" });
+  expect(refused.status).toBe(401);
+  // The codes the guide names are the ones the Table sends.
+  expect(refused.body.error.code).toBe("invalid_session");
+  const unset = await call(meRoute);
+  expect(unset.body.error.code).toBe("missing_session");
+  expect(guide).toMatch(/`invalid_session` means the session has ended/);
+  expect(grepSaysDone(grep, refused.text)).toBe(true);
+  expect(spawnSync("bash", ["-c", grep], { input: "" }).status).not.toBe(0);
 });
