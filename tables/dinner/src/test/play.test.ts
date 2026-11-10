@@ -240,7 +240,7 @@ describe("the spectator feed", () => {
     expect(feed.outcome?.reveals).toHaveLength(6);
     expect(feed.outcome?.scores?.rows).toHaveLength(6);
     expect(feed.outcome?.measures.map((m) => m.label)).toContain(
-      "Worst-off guest",
+      "Lowest score",
     );
     expect(feed.timeline.at(-1)?.text).toContain("Everyone backed P1");
   });

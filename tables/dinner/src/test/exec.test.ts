@@ -266,7 +266,7 @@ describe("the executive seating game over HTTP", () => {
 });
 
 describe("a party played under the first rules", () => {
-  it("still replays and renders", async () => {
+  it("still replays and renders, with honest scores", async () => {
     const players = ["alice", "bobby", "carol", "david"];
     const events = startParty(
       players,
@@ -287,7 +287,18 @@ describe("a party played under the first rules", () => {
     const over = await call(getMatch, { params: { id } });
     expect(over.body.phase).toBe("over");
     expect(over.body.result.how).toBe("random");
-    feedSchema.parse((await call(spectateOne, { params: { id } })).body);
+    const feed = feedSchema.parse(
+      (await call(spectateOne, { params: { id } })).body,
+    );
+    expect(feed.outcome?.scores?.columns.map((c) => c.label)).toEqual([
+      "Score",
+      "Best possible",
+      "Worst possible",
+      "Fairest seating gave",
+    ]);
+    expect(feed.outcome?.measures.every((m) => m.format === "number")).toBe(
+      true,
+    );
     const [row] = await db()<{ result: { how: string } }[]>`
       SELECT result FROM results WHERE match_id = ${id}`;
     expect(row?.result.how).toBe("random");
