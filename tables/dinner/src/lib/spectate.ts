@@ -148,7 +148,7 @@ function outcome(s: MatchState): NonNullable<Feed["outcome"]> {
   const low = r.satisfaction.indexOf(r.worst_off);
   return {
     summary:
-      `${(HOW[end.how] ?? "").replace("{p}", end.proposal ?? "")} ${d.guests[low]} came off worst, with ${pct(r.worst_off)} of what they could have had.${isFairest(r) ? " No seating would have left the worst-off guest better off." : ""}`.trim(),
+      `${(HOW[end.how] ?? "").replace("{p}", end.proposal ?? "")} ${d.guests[low]} came off worst, at ${pct(r.worst_off)} satisfaction.${r.worst_off >= r.best_worst_off - 1e-9 ? " No seating would have left its worst-off guest better off." : ""}`.trim(),
     measures: [
       {
         label: "Value captured",
@@ -201,14 +201,14 @@ export function scoreTable(
   r: Pick<Report, "scores" | "satisfaction" | "short_of_fairest">,
 ): NonNullable<NonNullable<Feed["outcome"]>["scores"]> {
   const b = bounds(d.feel);
-  const fair = !isFairest(r);
+  const showFairest = !isFairest(r);
   return {
     columns: [
       { key: "score", label: "Score", format: "number" },
       { key: "worst", label: "Worst possible", format: "number" },
       { key: "best", label: "Best possible", format: "number" },
       { key: "satisfaction", label: "Satisfaction", format: "percent" },
-      ...(fair
+      ...(showFairest
         ? [
             {
               key: "vs_fairest",
@@ -226,7 +226,7 @@ export function scoreTable(
         best: b.best[i] ?? null,
         satisfaction: r.satisfaction[i] ?? null,
         // Positive: better off than the fairest seating would have left them.
-        ...(fair
+        ...(showFairest
           ? {
               vs_fairest:
                 r.short_of_fairest[i] === undefined

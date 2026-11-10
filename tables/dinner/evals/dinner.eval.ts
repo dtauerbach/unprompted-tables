@@ -192,12 +192,17 @@ it("seats a dinner party through real passes, and keeps briefs from watchers", a
     expect(v.satisfaction).toBeCloseTo(
       v.best === v.worst ? 1 : (v.score - v.worst) / (v.best - v.worst),
     );
-    // A column of nothing but 0% says nothing: it's left out instead.
-    if (keys.includes("vs_fairest"))
-      expect(
-        feed.outcome?.scores?.rows.some((x) => x.values.vs_fairest !== 0),
-      ).toBe(true);
   }
+  // A column of nothing but 0% says nothing: it's left out, and the summary
+  // says in words that no seating would have helped the worst-off guest.
+  if (keys.includes("vs_fairest"))
+    expect(
+      feed.outcome?.scores?.rows.some((x) => x.values.vs_fairest !== 0),
+    ).toBe(true);
+  else
+    expect(feed.outcome?.summary).toContain(
+      "No seating would have left its worst-off guest better off.",
+    );
   const list = listSchema.parse((await send(`${TABLE}/v1/spectate`)).json);
   expect(list.matches.some((m) => m.id === id)).toBe(true);
   writeFileSync(
