@@ -1,9 +1,10 @@
 import { LIMITS } from "@unprompted-tables/spectator";
 import { z } from "zod";
-import { CONFIGURATIONS } from "./configs";
+import { CONFIGURATIONS, type Rule } from "./configs";
 
-// The executive seating game's variants. A variant names a configuration
-// (private until the end) and sets the public rules: the voting rule, the
+// The executive seating game's variants. A variant names a configuration,
+// or a weighted mix of configurations to draw one from per match (private
+// until the end either way), and sets the public rules: the voting rule, the
 // number of rounds, every clock, and the talk limits. Each match records
 // what it was dealt under, so changing a variant never changes a match
 // already played.
@@ -53,11 +54,32 @@ export function execFeedBytes(v: {
   );
 }
 
+const configName = z.enum(Object.keys(CONFIGURATIONS) as [string, ...string[]]);
+
+// The configurations a variant can deal, with their weights.
+export function configsOf(v: {
+  config: string | Partial<Record<string, number>>;
+}): { id: string; weight: number }[] {
+  return typeof v.config === "string"
+    ? [{ id: v.config, weight: 1 }]
+    : Object.entries(v.config).map(([id, weight]) => ({
+        id,
+        weight: weight ?? 0,
+      }));
+}
+
 export const execVariantSchema = z
   .strictObject({
     game: z.literal("exec"),
     name: z.string().regex(/^[a-z][a-z0-9-]{0,30}$/),
-    config: z.enum(Object.keys(CONFIGURATIONS) as [string, ...string[]]),
+    // One configuration, or several with whole-number weights, one drawn
+    // per match from a seed stream of its own.
+    config: z.union([
+      configName,
+      z
+        .partialRecord(configName, int(1, 100))
+        .refine((m) => Object.keys(m).length >= 1, "name a configuration"),
+    ]),
     rule: z.enum(["unanimity", "majority"]),
     rounds: int(1, 6),
     clocks: z.strictObject({ first: clock, later: clock }),
@@ -69,6 +91,10 @@ export const execVariantSchema = z
     // No deal: every executive gets their worst possible seating minus this.
     no_deal_margin: int(1, 100),
   })
+  .refine(
+    (v) => configsOf(v).every(({ id }) => CONFIGURATIONS[id]?.rule === v.rule),
+    { message: "every configuration must use the variant's voting rule" },
+  )
   .refine(
     (v) => 5 * v.messages_per_assistant + 4 * v.rounds + 4 <= LIMITS.timeline,
     { message: "a full match's moves wouldn't all fit what watchers see" },
@@ -91,7 +117,7 @@ function variant(config: string, name = config): ExecVariant {
     game: "exec",
     name,
     config,
-    rule: (CONFIGURATIONS[config] as { rule: "unanimity" | "majority" }).rule,
+    rule: (CONFIGURATIONS[config] as { rule: Rule }).rule,
     rounds: 3,
     clocks: CLOCKS,
     messages_per_assistant: 40,
@@ -105,6 +131,12 @@ export const EXEC_VARIANTS: Record<string, ExecVariant> = {
   compromise: variant("compromise"),
   standoff: variant("standoff"),
   scramble: variant("scramble"),
+  // The three unanimity configurations, one drawn per match, the standoff
+  // twice as often as each of the others.
+  "exec-mix": {
+    ...variant("standoff", "exec-mix"),
+    config: { aligned: 1, compromise: 1, standoff: 2 },
+  },
   // For scripted evals and tests: a compromise with short clocks.
   "quick-compromise": {
     ...variant("compromise", "quick-compromise"),

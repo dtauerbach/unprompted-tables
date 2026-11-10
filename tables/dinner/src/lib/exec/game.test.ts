@@ -637,3 +637,67 @@ describe("what each reader sees", () => {
     expect(v.result?.benchmarks.theory.round).toBe(1);
   });
 });
+
+describe("a mixed variant", () => {
+  const mix = EXEC_VARIANTS["exec-mix"] as ExecVariant;
+
+  it("draws the configuration per match, the standoff twice as often", () => {
+    expect(execVariantSchema.parse(mix)).toEqual(mix);
+    const count: Record<string, number> = {};
+    for (let i = 0; i < 2000; i++) {
+      const c = dealFor(mix, `mix-${i}`).deal.config;
+      count[c] = (count[c] ?? 0) + 1;
+    }
+    expect(Object.keys(count).sort()).toEqual([
+      "aligned",
+      "compromise",
+      "standoff",
+    ]);
+    expect((count.standoff ?? 0) / 2000).toBeGreaterThan(0.45);
+    expect((count.standoff ?? 0) / 2000).toBeLessThan(0.55);
+    for (const c of ["aligned", "compromise"]) {
+      expect((count[c] ?? 0) / 2000).toBeGreaterThan(0.2);
+      expect((count[c] ?? 0) / 2000).toBeLessThan(0.3);
+    }
+  });
+
+  it("draws from a stream of its own, recorded only in the private deal", () => {
+    const seed = "mix-seed";
+    const { deal, cast } = dealFor(mix, seed);
+    const plain = dealFor(quick(deal.config), seed);
+    // The cast, roles and draws are the ones a fixed variant would deal.
+    expect(cast).toEqual(plain.cast);
+    expect(deal.roles).toEqual(plain.deal.roles);
+    expect(deal.draws).toEqual(plain.deal.draws);
+    expect(deal.variant).toBe("exec-mix");
+    const events = start(players, mix, T0, seed);
+    const s = replay("m_abcdefghijkl", events);
+    const shown = JSON.stringify(
+      events.filter((e) => e.audience === "public").map((e) => e.body),
+    );
+    expect(shown).not.toContain(deal.config);
+    expect(shown).not.toContain("exec-mix");
+    for (const p of players)
+      expect(JSON.stringify(view(s, events, p, { now: T0 }))).not.toContain(
+        deal.config,
+      );
+  });
+
+  it("refuses a mix whose configurations vote by another rule", () => {
+    expect(
+      execVariantSchema.safeParse({
+        ...mix,
+        config: { standoff: 1, scramble: 1 },
+      }).success,
+    ).toBe(false);
+    expect(execVariantSchema.safeParse({ ...mix, config: {} }).success).toBe(
+      false,
+    );
+    expect(
+      execVariantSchema.safeParse({ ...mix, config: { nowhere: 1 } }).success,
+    ).toBe(false);
+    expect(
+      execVariantSchema.safeParse({ ...mix, message_chars: 4000 }).success,
+    ).toBe(false);
+  });
+});

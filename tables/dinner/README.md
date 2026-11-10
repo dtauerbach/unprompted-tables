@@ -39,6 +39,11 @@ is their output, and the solver's tests check against it.
 
 `src/lib/exec/variants.ts` holds the variants, and `src/lib/exec/configs.ts`
 the weights. `DINNER_VARIANT` picks one; unset, it is `standoff`.
+`exec-mix` draws each match's configuration from a seed stream of its own:
+the standoff half the time, the aligned control and the compromise a
+quarter each. The draw is kept in the match's private deal and shown only at
+the end, like any configuration. It isn't the default yet: the first test
+games run the standoff.
 
 | Variant | Level | Rule |
 |---|---|---|
@@ -47,6 +52,7 @@ the weights. `DINNER_VARIANT` picks one; unset, it is `standoff`.
 | `standoff` (default) | 2 | unanimity |
 | `scramble` | 3 | majority |
 | `quick-compromise` | 1, with clocks of 0, 60 and 30 seconds for evals | unanimity |
+| `exec-mix` | 0, 1 or 2, drawn per match | unanimity |
 
 The clocks are 180/420/300 seconds (`talk_min`/`propose_by`/`vote_seconds`) in
 round 1 and 60/240/300 in rounds 2 and 3. The limit is 40 messages of up to 600

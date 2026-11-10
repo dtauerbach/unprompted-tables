@@ -5,7 +5,12 @@ import { INVALID_TALK, validTalk } from "../text";
 import { type Benchmarks, benchmarks } from "./benchmarks";
 import { CONFIGURATIONS, ROLES, type Rule } from "./configs";
 import { canonicalOrder, pointsOf, table } from "./solver";
-import { type Clock, type ExecVariant, execVariantSchema } from "./variants";
+import {
+  type Clock,
+  configsOf,
+  type ExecVariant,
+  execVariantSchema,
+} from "./variants";
 
 // The executive seating game: Baron-Ferejohn bargaining with free talk.
 // Five assistants each play for one fictional executive; six people sit at
@@ -194,6 +199,19 @@ export function spellSeating(order: readonly number[]): string[] {
 
 // The deal. The cast (who plays which name, and which name plays which
 // role) comes from a stream of its own; the proposer draws from another.
+// A mixed variant's configuration is drawn from its own stream, so the
+// cast and the proposer draws don't depend on whether it was mixed.
+export function drawConfig(v: ExecVariant, seed: string): string {
+  const options = configsOf(v);
+  const total = options.reduce((n, o) => n + o.weight, 0);
+  let k = pick(rng(seed, "configuration"), total);
+  for (const o of options) {
+    if (k < o.weight) return o.id;
+    k -= o.weight;
+  }
+  return (options.at(-1) as { id: string }).id;
+}
+
 export function dealFor(
   v: ExecVariant,
   seed: string,
@@ -201,8 +219,8 @@ export function dealFor(
   cast: number[];
   deal: ExecDeal;
 } {
-  const config = CONFIGURATIONS[v.config];
-  if (!config) throw new Error(`no configuration ${v.config}`);
+  const config = CONFIGURATIONS[drawConfig(v, seed)];
+  if (!config) throw new Error(`no configuration in ${v.name}`);
   const shown = rng(seed, "cast");
   const cast = shuffle(
     shown,
