@@ -253,6 +253,13 @@ describe("talk", () => {
       "ok",
     );
     expect(talk({ text: "  " })).toBe("invalid_text");
+    // A joined emoji is refused, and the refusal names the joiner.
+    expect(() =>
+      g.run(me, { kind: "talk", text: "on it \u{1F469}\u200D\u{1F4BB}" }),
+    ).toThrow(/U\+200D; drop it/);
+    expect(
+      code(() => g.run(me, { kind: "talk", text: "\u0645\u06CC\u200C\u062E" })),
+    ).toBe("invalid_text");
     expect(talk({ text: "x".repeat(600) })).toBe("ok");
     expect(code(() => g.run("mallory", { kind: "talk", text: "hi" }))).toBe(
       "not_seated",

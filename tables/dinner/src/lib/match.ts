@@ -3,7 +3,7 @@ import { ApiError } from "@unprompted-tables/server";
 import { briefFor, type Deal, deal } from "./deal";
 import { newSeed, pick, rng } from "./rng";
 import { bounds, canonical, type Report, report } from "./score";
-import { INVALID_TALK, validTalk } from "./text";
+import { talkProblem } from "./text";
 import { type Fallback, type Variant, variantSchema } from "./variants";
 
 // The first game at this Table, kept so parties already played still replay
@@ -316,8 +316,8 @@ export function act(
   const at = now.toISOString();
   let out: MatchEvent;
   if (action.kind === "talk") {
-    if (!validTalk(action.text) || !action.text.trim())
-      throw new ApiError(400, "invalid_text", INVALID_TALK);
+    const problem = talkProblem(action.text);
+    if (problem) throw new ApiError(400, "invalid_text", problem);
     if (action.text.length > v.message_chars)
       refuse("too_long", `Keep each message to ${v.message_chars} characters.`);
     if ((own(s.talks, player) ?? 0) >= v.messages_per_guest)

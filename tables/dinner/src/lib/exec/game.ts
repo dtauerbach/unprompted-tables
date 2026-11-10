@@ -1,7 +1,7 @@
 import { type VisibleEvent, visibleEvents } from "@unprompted-tables/game";
 import { ApiError } from "@unprompted-tables/server";
 import { newSeed, pick, rng, shuffle } from "../rng";
-import { INVALID_TALK, validTalk } from "../text";
+import { talkProblem } from "../text";
 import { type Benchmarks, benchmarks } from "./benchmarks";
 import { CONFIGURATIONS, ROLES, type Rule } from "./configs";
 import { canonicalOrder, pointsOf, table } from "./solver";
@@ -559,8 +559,8 @@ export function act(
   const at = now.toISOString();
   const c = clockFor(s, r.number);
   if (action.kind === "talk") {
-    if (!validTalk(action.text) || !action.text.trim())
-      invalid("invalid_text", INVALID_TALK);
+    const problem = talkProblem(action.text);
+    if (problem) invalid("invalid_text", problem);
     if (action.text.length > s.rules.message_chars)
       refuse(
         "too_long",

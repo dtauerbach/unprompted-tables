@@ -312,6 +312,9 @@ describe("a party", () => {
     expect(code(() => p.run("bobby", { kind: "talk", text: "   " }))).toBe(
       "invalid_text",
     );
+    expect(() =>
+      p.run("bobby", { kind: "talk", text: "soft\u00ADhyphen" }),
+    ).toThrow("U+00AD");
     expect(p.run("alice", { kind: "back", proposal: "P1" })).toEqual([]);
     expect(
       code(() =>
