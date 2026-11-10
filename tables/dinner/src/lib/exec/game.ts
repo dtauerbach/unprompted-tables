@@ -50,6 +50,12 @@ export type ExecDeal = {
   weights: number[][];
   // The proposer of each round, as an index into EXECUTIVES.
   draws: number[];
+  // What the configuration was drawn from, in order, and the dealt
+  // configuration's weights by role, so a past deal can be re-derived even
+  // if the variants or configurations change later. Absent in deals made
+  // before they were kept.
+  mix?: { config: string; weight: number }[];
+  config_weights?: Record<string, Record<string, number>>;
 };
 
 type Body =
@@ -244,6 +250,17 @@ export function dealFor(
       roles,
       weights,
       draws,
+      mix: configsOf(v).map((o) => ({ config: o.id, weight: o.weight })),
+      config_weights: Object.fromEntries(
+        Object.entries(config.weights).map(([role, w]) => [
+          role,
+          Object.fromEntries(
+            Object.entries(w).filter(
+              (x): x is [string, number] => typeof x[1] === "number",
+            ),
+          ),
+        ]),
+      ),
     },
   };
 }

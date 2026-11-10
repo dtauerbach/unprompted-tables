@@ -56,16 +56,14 @@ export function execFeedBytes(v: {
 
 const configName = z.enum(Object.keys(CONFIGURATIONS) as [string, ...string[]]);
 
-// The configurations a variant can deal, with their weights.
+// The configurations a variant can deal, with their weights, in the
+// variant's own order (the draw walks this list, so order is part of it).
 export function configsOf(v: {
-  config: string | Partial<Record<string, number>>;
+  config: string | { config: string; weight: number }[];
 }): { id: string; weight: number }[] {
   return typeof v.config === "string"
     ? [{ id: v.config, weight: 1 }]
-    : Object.entries(v.config).map(([id, weight]) => ({
-        id,
-        weight: weight ?? 0,
-      }));
+    : v.config.map((o) => ({ id: o.config, weight: o.weight }));
 }
 
 export const execVariantSchema = z
@@ -77,8 +75,12 @@ export const execVariantSchema = z
     config: z.union([
       configName,
       z
-        .partialRecord(configName, int(1, 100))
-        .refine((m) => Object.keys(m).length >= 1, "name a configuration"),
+        .array(z.strictObject({ config: configName, weight: int(1, 100) }))
+        .min(1)
+        .refine(
+          (m) => new Set(m.map((o) => o.config)).size === m.length,
+          "name each configuration once",
+        ),
     ]),
     rule: z.enum(["unanimity", "majority"]),
     rounds: int(1, 6),
@@ -135,7 +137,11 @@ export const EXEC_VARIANTS: Record<string, ExecVariant> = {
   // twice as often as each of the others.
   "exec-mix": {
     ...variant("standoff", "exec-mix"),
-    config: { aligned: 1, compromise: 1, standoff: 2 },
+    config: [
+      { config: "aligned", weight: 1 },
+      { config: "compromise", weight: 1 },
+      { config: "standoff", weight: 2 },
+    ],
   },
   // For scripted evals and tests: a compromise with short clocks.
   "quick-compromise": {

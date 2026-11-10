@@ -677,6 +677,13 @@ describe("a mixed variant", () => {
     expect(deal.roles).toEqual(plain.deal.roles);
     expect(deal.draws).toEqual(plain.deal.draws);
     expect(deal.variant).toBe("exec-mix");
+    // The deal keeps what it was drawn from and the weights it dealt.
+    expect(deal.mix).toEqual([
+      { config: "aligned", weight: 1 },
+      { config: "compromise", weight: 1 },
+      { config: "standoff", weight: 2 },
+    ]);
+    expect(deal.config_weights).toEqual(CONFIGURATIONS[deal.config]?.weights);
     const events = start(players, mix, T0, seed);
     const s = replay("m_abcdefghijkl", events);
     const shown = JSON.stringify(
@@ -694,17 +701,40 @@ describe("a mixed variant", () => {
     expect(
       execVariantSchema.safeParse({
         ...mix,
-        config: { standoff: 1, scramble: 1 },
+        config: [
+          { config: "standoff", weight: 1 },
+          { config: "scramble", weight: 1 },
+        ],
       }).success,
     ).toBe(false);
-    expect(execVariantSchema.safeParse({ ...mix, config: {} }).success).toBe(
+    expect(execVariantSchema.safeParse({ ...mix, config: [] }).success).toBe(
       false,
     );
     expect(
-      execVariantSchema.safeParse({ ...mix, config: { nowhere: 1 } }).success,
+      execVariantSchema.safeParse({
+        ...mix,
+        config: [{ config: "nowhere", weight: 1 }],
+      }).success,
     ).toBe(false);
     expect(
       execVariantSchema.safeParse({ ...mix, message_chars: 4000 }).success,
     ).toBe(false);
+  });
+
+  it("draws by the listed order, not by how an object happens to be keyed", () => {
+    const flipped = {
+      ...mix,
+      config: [
+        ...(mix.config as { config: string; weight: number }[]),
+      ].reverse(),
+    };
+    const differ = Array.from({ length: 200 }, (_, i) => `order-${i}`).filter(
+      (seed) =>
+        dealFor(mix, seed).deal.config !== dealFor(flipped, seed).deal.config,
+    );
+    // Same weights, other order: some draws land elsewhere, so the order is
+    // part of the variant and is kept in the deal.
+    expect(differ.length).toBeGreaterThan(0);
+    expect(dealFor(flipped, "order-0").deal.mix?.[0]?.config).toBe("standoff");
   });
 });
