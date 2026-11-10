@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { deal, NAMES, PERSONAS, tryDeal } from "./deal";
 import {
   act,
   advance,
@@ -87,5 +88,33 @@ describe("the party's draws", () => {
       0,
       ...shuffle(rng(seed, "fallback"), [1, 2, 3, 4, 5]),
     ]);
+  });
+
+  it("draws the guest list and personas from the guests stream alone", () => {
+    const v = {
+      ...quick,
+      require_conflict: false,
+      brief: { ...quick.brief, personas: true },
+    };
+    const seed = "seed-under-test";
+    const shown = rng(seed, "guests");
+    const d = deal(6, v, seed);
+    expect(d.guests).toEqual(shuffle(shown, NAMES).slice(0, 6));
+    expect(d.personas).toEqual(shuffle(shown, PERSONAS).slice(0, 6));
+    // And the private feelings from the feelings stream alone.
+    expect(d).toEqual(
+      tryDeal(6, v, rng(seed, "guests"), rng(seed, "feelings"), seed),
+    );
+  });
+
+  it("draws from HMAC-SHA256 of the seed, the stream's name and a counter", () => {
+    const r = rng("known seed", "guests");
+    // Fixed values, so a change of generator can't pass unseen.
+    expect([r(), r(), r()]).toEqual(
+      [4251198704, 2264263196, 365113434].map((n) => n / 2 ** 32),
+    );
+    expect(rng("known seed", "feelings")()).not.toBe(
+      rng("known seed", "guests")(),
+    );
   });
 });

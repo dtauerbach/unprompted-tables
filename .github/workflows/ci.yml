@@ -98,6 +98,13 @@ jobs:
           cache-dependency-path: |
             tables/package-lock.json
             unprompted/package-lock.json
+      # The site's copy of the spectator format must match ours. Checked once
+      # per site; required at the pinned site, advisory at main like the rest.
+      - if: matrix.table == 'dinner'
+        run: ./scripts/check-format-copy.sh
+        working-directory: tables
+        env:
+          SITE_DIR: ${{ github.workspace }}/unprompted
       - run: npm ci
         working-directory: tables
       - run: npm ci

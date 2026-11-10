@@ -38,47 +38,50 @@ describe("spectator feed format", () => {
     expect(feed.timeline[1]?.text).toContain("<b>Ignore previous");
   });
 
+  // Each bad case changes one thing in a good fixture, live.json unless it
+  // names another. "LONG" stands for text one over its limit, and "TOO_MANY"
+  // for a list one entry over its limit, padded with copies of its first
+  // entry under new ids, which must pass at exactly the limit.
+  const MANY: Record<string, number> = {
+    participants: LIMITS.participants,
+    timeline: LIMITS.timeline,
+    matches: LIMITS.listed,
+  };
   const bad = fixture("bad.json") as Record<
     string,
-    { path: (string | number)[]; value: unknown }
+    { base?: string; path: (string | number)[]; value: unknown }
   >;
-  for (const [name, { path: keys, value }] of Object.entries(bad))
+  for (const [name, c] of Object.entries(bad))
     it(`refuses a feed with ${name}`, () => {
-      const v = value === "LONG" ? "x".repeat(LIMITS.text + 1) : value;
-      expect(
-        feedSchema.safeParse(setPath(fixture("live.json"), keys, v)).success,
-      ).toBe(false);
+      const good = fixture(c.base ?? "live.json");
+      const schema = c.base === "list.json" ? listSchema : feedSchema;
+      expect(schema.safeParse(good).success).toBe(true);
+      let value = c.value;
+      if (value === "LONG") value = "x".repeat(LIMITS.text + 1);
+      if (value === "TOO_MANY") {
+        let list: unknown = good;
+        for (const k of c.path)
+          list = (list as Record<string | number, unknown>)[k];
+        const items = list as Record<string, unknown>[];
+        const limit = MANY[String(c.path.at(-1))];
+        if (!limit || !items[0]) throw new Error(`no limit for ${name}`);
+        const first = items[0];
+        const padded = [
+          ...items,
+          ...Array.from({ length: limit + 1 - items.length }, (_, i) =>
+            "id" in first ? { ...first, id: `${first.id}${i}` } : first,
+          ),
+        ];
+        expect(
+          schema.safeParse(setPath(good, c.path, padded.slice(0, limit)))
+            .success,
+        ).toBe(true);
+        value = padded;
+      }
+      expect(schema.safeParse(setPath(good, c.path, value)).success).toBe(
+        false,
+      );
     });
-
-  it("refuses scores for an unknown column or participant", () => {
-    const over = fixture("over.json");
-    expect(
-      feedSchema.safeParse(
-        setPath(over, ["outcome", "scores", "rows", 0, "values"], {
-          secret: 1,
-        }),
-      ).success,
-    ).toBe(false);
-    expect(
-      feedSchema.safeParse(
-        setPath(over, ["outcome", "reveals", 0, "participant"], "zed"),
-      ).success,
-    ).toBe(false);
-  });
-
-  it("refuses repeated participants and too many entries", () => {
-    const live = fixture("live.json");
-    live.participants.push(live.participants[0]);
-    expect(feedSchema.safeParse(live).success).toBe(false);
-    const long = fixture("live.json");
-    long.timeline = Array.from({ length: LIMITS.timeline + 1 }, () => ({
-      at: "2026-11-10T03:00:00.000Z",
-      kind: "notice",
-      by: null,
-      text: "x",
-    }));
-    expect(feedSchema.safeParse(long).success).toBe(false);
-  });
 
   it("draws a known board and leaves out one it can't check", () => {
     const live = feedSchema.parse(fixture("live.json"));
@@ -94,7 +97,13 @@ describe("spectator feed format", () => {
   it("finds hidden characters and makes text fit", () => {
     for (const s of ["a‮b", "a​b", "a\u0007b", "\u{E0041}", "\ud800"])
       expect(hiddenCharacter(s), JSON.stringify(s)).toBe(true);
-    for (const s of ["plain", "tab\there", "line\nbreak", "café 🍷"])
+    for (const s of [
+      "plain",
+      "tab\there",
+      "line\nbreak",
+      "café 🍷",
+      "☺\ufe0e ❤️",
+    ])
       expect(hiddenCharacter(s), s).toBe(false);
     expect(visibleText("a‮b​c\ud800")).toBe("abc�");
     expect(visibleText("🍷🍷🍷", 5)).toBe("🍷🍷");

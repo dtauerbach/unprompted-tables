@@ -6,7 +6,7 @@ import type { Variant } from "./variants";
 // grudges ever reach the table, and because the Table knows each guest's
 // true feelings, every seating can be scored against what was possible.
 
-const NAMES = [
+export const NAMES = [
   "Ada",
   "Basil",
   "Cora",
@@ -25,7 +25,7 @@ const NAMES = [
   "Pia",
 ];
 
-const PERSONAS = [
+export const PERSONAS = [
   "a retired diver with too many squid stories",
   "a pastry chef who judges every dessert",
   "a chess coach who hates losing at anything",
@@ -55,7 +55,7 @@ export type Deal = {
 
 // Names and personas are shown to everyone, so they come from a stream of
 // their own: nothing about the private feelings can be worked out from them.
-function tryDeal(
+export function tryDeal(
   n: number,
   v: Variant,
   shown: () => number,

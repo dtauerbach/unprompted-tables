@@ -10,6 +10,25 @@ export const GUESTS = { min: 4, max: 9 } as const;
 
 const int = (min: number, max: number) => z.number().int().min(min).max(max);
 
+// The most a full party's feed could weigh, as UTF-8 JSON: every guest's
+// talk at full length in a script that takes three bytes a character (the
+// most any character a feed keeps can take, escaped), every proposal and
+// change of backing, and each brief revealed at the end. Kept generous; a
+// test plays a full party at its worst and checks this is never under.
+const ENTRY = 120; // an entry's other fields
+const ACTION = 200; // a proposal's or a backing's words, names included
+const PER_GUEST = 3 * LIMITS.reveal + 6 * LIMITS.label + 600;
+export function feedBytes(v: {
+  messages_per_guest: number;
+  message_chars: number;
+  proposals_per_guest: number;
+  backs_per_guest: number;
+}): number {
+  const talk = v.messages_per_guest * (3 * v.message_chars + ENTRY);
+  const moves = (v.proposals_per_guest + v.backs_per_guest) * (ACTION + ENTRY);
+  return GUESTS.max * (talk + moves + PER_GUEST) + 20_000;
+}
+
 export const FALLBACKS = [
   // The plan with the most backers, if exactly one has the most.
   "most_backed",
@@ -75,7 +94,11 @@ export const variantSchema = z
         2 <=
       LIMITS.timeline,
     { message: "a full party's moves wouldn't all fit what watchers see" },
-  );
+  )
+  // Nor may the feed outgrow what Unprompted takes, or no one sees the party.
+  .refine((v) => feedBytes(v) <= LIMITS.bytes, {
+    message: "a full party's feed would be too big for watchers",
+  });
 export type Variant = z.infer<typeof variantSchema>;
 
 const classic: Variant = {
