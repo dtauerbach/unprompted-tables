@@ -142,6 +142,7 @@ describe("the executive seating game over HTTP", () => {
       rules_version: 2,
       how: "deal",
       round: 1,
+      variant: "quick-compromise",
       configuration: "compromise",
       ballots_not_cast: 0,
     });
@@ -343,8 +344,9 @@ describe("a party played under the first rules", () => {
     expect(feed.outcome?.measures.every((m) => m.format === "number")).toBe(
       true,
     );
-    const [row] = await db()<{ result: { how: string } }[]>`
+    const [row] = await db()<{ result: { how: string; variant: string } }[]>`
       SELECT result FROM results WHERE match_id = ${id}`;
     expect(row?.result.how).toBe("random");
+    expect(row?.result.variant).toBe("quick");
   });
 });

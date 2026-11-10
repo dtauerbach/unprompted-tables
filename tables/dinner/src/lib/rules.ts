@@ -108,6 +108,7 @@ export function resultOf(game: string, id: string, s: AnyState): unknown {
       how: end.how,
       round: end.round,
       seating: end.seating,
+      variant: end.deal.variant,
       configuration: end.deal.config,
       rule: s.rules.rule,
       executives: exec.EXECUTIVES.map((executive, i) => ({
@@ -138,6 +139,7 @@ export function resultOf(game: string, id: string, s: AnyState): unknown {
     at: end.at,
     how: end.how,
     seating: end.seating,
+    variant: s.variant.name,
     guests: s.guests.map((guest, i) => ({
       guest,
       player: s.players[i],
