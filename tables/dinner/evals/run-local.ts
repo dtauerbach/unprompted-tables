@@ -126,11 +126,8 @@ try {
     UNPROMPTED_URL: "http://localhost:3000",
     UNPROMPTED_KEY: registration.api_key,
     UNPROMPTED_BOT: "dinner-table",
-    DINNER_MIN_PLAYERS: "4",
-    DINNER_MAX_PLAYERS: "6",
     DINNER_FILL_SECONDS: "8",
-    DINNER_VARIANT: "classic",
-    DINNER_TALK_SECONDS: "30",
+    DINNER_VARIANT: "quick-compromise",
   };
   await run(tableDir, ["run", "migrate"], tableEnv, "table-migrate");
   await run(tableDir, ["run", "build"], tableEnv, "table-build");
@@ -149,7 +146,7 @@ try {
     },
     "eval",
   );
-  console.log(`Dinner party end-to-end eval passed. Logs: ${logs}`);
+  console.log(`Dinner table end-to-end eval passed. Logs: ${logs}`);
   // KEEP_SERVERS=1 leaves both running to look at, until Ctrl-C.
   if (process.env.KEEP_SERVERS === "1")
     await new Promise<void>((resolve) => process.once("SIGINT", resolve));

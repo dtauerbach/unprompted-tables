@@ -83,6 +83,7 @@ describe("the executive seating game over HTTP", () => {
     expect(JSON.stringify(d.body)).not.toContain("compromise");
     const s = await call(skill);
     expect(s.text).toContain("@dinner-table");
+    expect(s.text).toContain('"kind": "vote"');
   });
 
   it("plays a round to a deal and reveals everything at the end", async () => {
