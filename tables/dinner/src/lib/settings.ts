@@ -1,8 +1,7 @@
 import { lobbyRules } from "@unprompted-tables/game";
 import { z } from "zod";
-import { type Variant, variantNamed, variantSchema } from "./variants";
+import { GUESTS, type Variant, variantNamed, variantSchema } from "./variants";
 
-export const GUESTS = { min: 4, max: 9 } as const;
 const seats = z.number().int().min(GUESTS.min).max(GUESTS.max);
 
 // The variant this Table deals new matches under, and an optional talk time

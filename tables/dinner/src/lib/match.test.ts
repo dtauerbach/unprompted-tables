@@ -187,6 +187,14 @@ describe("dealing", () => {
         lock: { consensus: "all", fallback: ["most_backed"] },
       }).success,
     ).toBe(false);
+    // A full party's moves must all fit what watchers see.
+    expect(
+      variantSchema.safeParse({
+        ...quick,
+        messages_per_guest: 200,
+        backs_per_guest: 200,
+      }).success,
+    ).toBe(false);
     expect(variantSchema.safeParse({ ...quick, talk_seconds: 1 }).success).toBe(
       false,
     );
@@ -379,9 +387,12 @@ describe("a party", () => {
       });
       q.tick(quick.talk_seconds);
       expect(q.state.end?.how).toBe("random");
-      return (q.state.end?.seating ?? []).join();
+      // By seat, not by name: names differ per seed anyway.
+      return (q.state.end?.seating ?? []).map((n) => h.indexOf(n)).join();
     };
-    expect(tied("42")).toBe((p.state.end?.seating ?? []).join());
+    expect(tied("42")).toBe(
+      (p.state.end?.seating ?? []).map((n) => g.indexOf(n)).join(),
+    );
     const draws = new Set(
       Array.from({ length: 12 }, (_, i) => tied(`other-${i}`)),
     );
