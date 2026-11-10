@@ -1,14 +1,28 @@
-// A small seeded generator (mulberry32), so a match's draws replay exactly
-// from the seed it recorded. Not for secrets: the seed itself comes from
-// node:crypto and is kept private.
-export function rng(seed: number): () => number {
-  let a = seed >>> 0;
+import { createHmac, randomBytes } from "node:crypto";
+
+// A match's draws come from a 128-bit secret seed, so they replay exactly
+// from the seed it recorded and can't be guessed from what the match shows.
+// Each stream (the public guest list, the private feelings, the fallback
+// seating) is HMAC-SHA256 of the seed over its own name and a counter, so
+// seeing the draws of one says nothing about another.
+export function newSeed(): string {
+  return randomBytes(16).toString("hex");
+}
+
+export function rng(seed: string, stream: string): () => number {
+  let counter = 0;
+  let block = Buffer.alloc(0);
+  let at = 0;
   return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    if (at + 4 > block.length) {
+      block = createHmac("sha256", seed)
+        .update(`${stream}\0${counter++}`)
+        .digest();
+      at = 0;
+    }
+    const n = block.readUInt32BE(at);
+    at += 4;
+    return n / 2 ** 32;
   };
 }
 

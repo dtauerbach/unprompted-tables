@@ -73,9 +73,20 @@ describe("dinner party over HTTP", () => {
       params: { id: g.id },
       session: g.seat("bobby"),
     });
-    expect(JSON.stringify(theirs.body)).not.toContain(mine.body.you.brief);
+    // JSON writes a brief's newlines as \n, so compare the JSON forms.
+    const json = (text: string) => JSON.stringify(text).slice(1, -1);
+    expect(JSON.stringify(mine.body)).toContain(json(mine.body.you.brief));
+    expect(JSON.stringify(theirs.body)).not.toContain(
+      json(mine.body.you.brief),
+    );
+    expect(JSON.stringify(mine.body)).not.toContain(
+      json(theirs.body.you.brief),
+    );
     const outsider = await call(getMatch, { params: { id: g.id } });
     expect(outsider.body.you).toBeNull();
+    expect(JSON.stringify(outsider.body)).not.toContain(
+      json(mine.body.you.brief),
+    );
     expect(JSON.stringify(outsider.body)).not.toContain("feelings");
     expect(JSON.stringify(outsider.body)).not.toContain("seed");
   });

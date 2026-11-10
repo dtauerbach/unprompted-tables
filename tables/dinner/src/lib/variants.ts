@@ -25,6 +25,9 @@ export const variantSchema = z.strictObject({
   messages_per_guest: int(1, 200),
   message_chars: int(50, 4000),
   proposals_per_guest: int(1, 50),
+  // Changes of backing, so flipping back and forth can't crowd the talk
+  // out of what watchers see.
+  backs_per_guest: int(1, 200),
   brief: z.strictObject({
     // Guests each one would love to sit beside.
     favorites: int(0, 3),
@@ -66,6 +69,7 @@ const classic: Variant = {
   messages_per_guest: 30,
   message_chars: 1000,
   proposals_per_guest: 5,
+  backs_per_guest: 20,
   brief: {
     favorites: 2,
     avoids: 1,

@@ -45,7 +45,7 @@ const PERSONAS = [
 ];
 
 export type Deal = {
-  seed: number;
+  seed: string;
   guests: string[];
   personas: (string | null)[];
   feel: Feelings;
@@ -53,11 +53,19 @@ export type Deal = {
   secret: boolean[][];
 };
 
-function tryDeal(n: number, v: Variant, r: () => number, seed: number): Deal {
+// Names and personas are shown to everyone, so they come from a stream of
+// their own: nothing about the private feelings can be worked out from them.
+function tryDeal(
+  n: number,
+  v: Variant,
+  shown: () => number,
+  r: () => number,
+  seed: string,
+): Deal {
   const b = v.brief;
-  const guests = shuffle(r, NAMES).slice(0, n);
+  const guests = shuffle(shown, NAMES).slice(0, n);
   const personas = b.personas
-    ? shuffle(r, PERSONAS).slice(0, n)
+    ? shuffle(shown, PERSONAS).slice(0, n)
     : guests.map(() => null);
   const feel: Feelings = guests.map((_, i) =>
     guests.map((_, j) => (i === j ? 0 : pick(r, 2 * b.mild + 1) - b.mild)),
@@ -106,12 +114,13 @@ export function conflicted(feel: Feelings): boolean {
   return bounds(feel).fairest_floor < 1;
 }
 
-export function deal(n: number, v: Variant, seed: number): Deal {
-  const r = rng(seed);
-  let d = tryDeal(n, v, r, seed);
+export function deal(n: number, v: Variant, seed: string): Deal {
+  const shown = rng(seed, "guests");
+  const r = rng(seed, "feelings");
+  let d = tryDeal(n, v, shown, r, seed);
   for (let tries = 1; v.require_conflict && tries < 20; tries++) {
     if (conflicted(d.feel)) break;
-    d = tryDeal(n, v, r, seed);
+    d = tryDeal(n, v, shown, r, seed);
   }
   return d;
 }

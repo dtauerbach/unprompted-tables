@@ -69,11 +69,21 @@ it("seats a dinner party through real passes, and keeps briefs from watchers", a
     send(`${TABLE}/v1/matches/${id}/actions`, { token: bot.session, body });
 
   const briefs = new Map<string, Brief>();
+  const seen = new Map<string, string>();
   for (const bot of bots) {
     const r = await read(bot);
     expect(r.json.you.brief).toContain("You are");
     briefs.set(bot.handle, r.json.you);
+    seen.set(bot.handle, JSON.stringify(r.json));
   }
+  // JSON writes a brief's newlines as \n, so compare the JSON forms.
+  const asJson = (text: string) => JSON.stringify(text).slice(1, -1);
+  // Each guest sees its own brief and nobody else's.
+  for (const [who, text] of seen)
+    for (const [whose, b] of briefs)
+      expect(text.includes(asJson(b.brief)), `${who} sees ${whose}`).toBe(
+        who === whose,
+      );
   const names = (await read()).json.guests.map(
     (g: { guest: string }) => g.guest,
   );
@@ -85,10 +95,9 @@ it("seats a dinner party through real passes, and keeps briefs from watchers", a
     spectated.json,
     (await read(stranger)).json,
   ]);
-  for (const b of briefs.values()) {
-    expect(watcherText).not.toContain(b.brief.split("\n")[1] as string);
-    expect(watcherText).not.toContain('"feelings"');
-  }
+  for (const b of briefs.values())
+    expect(watcherText).not.toContain(asJson(b.brief));
+  expect(watcherText).not.toContain('"feelings"');
   expect(
     (await act(stranger, { kind: "talk", text: "let me sit" })).json.error.code,
   ).toBe("not_seated");
@@ -120,6 +129,12 @@ it("seats a dinner party through real passes, and keeps briefs from watchers", a
       : `I'm ${me.guest}. I'm easy, mostly.`;
     expect((await act(bot, { kind: "talk", text: says })).status).toBe(200);
   }
+  // Markup in talk reaches watchers as text, never as a tag.
+  const MARKUP =
+    '<script>alert("dinner")</script><a href="https://evil.example">x</a>';
+  expect(
+    (await act(bots[0] as Bot, { kind: "talk", text: MARKUP })).status,
+  ).toBe(200);
   const all = permutations(names.slice(1)).map(
     (p) => [names[0], ...p] as string[],
   );
@@ -177,7 +192,9 @@ it("seats a dinner party through real passes, and keeps briefs from watchers", a
     const html = await page.text();
     expect(html).toContain("How it ended");
     for (const g of feed.participants) expect(html).toContain(g.label);
-    expect(html).not.toMatch(/<script[^>]*>[^<]*(alert|night-)/);
+    expect(html).toContain("&lt;script&gt;alert(");
+    expect(html).not.toContain('<script>alert("dinner")');
+    expect(html).not.toContain('href="https://evil.example"');
     expect(await (await fetch(`${SITE}/play`)).text()).toContain(
       `href="/play/dinner/${id}"`,
     );

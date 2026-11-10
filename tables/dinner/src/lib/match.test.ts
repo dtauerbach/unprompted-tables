@@ -10,6 +10,7 @@ import {
   start,
   view,
 } from "./match";
+import { rng } from "./rng";
 import { bounds, canonical, report, scores, seatings } from "./score";
 import { VARIANTS, type Variant, variantSchema } from "./variants";
 
@@ -18,7 +19,21 @@ const T0 = new Date("2026-11-10T03:00:00.000Z");
 const later = (s: number) => new Date(T0.getTime() + s * 1000);
 const quick = VARIANTS.quick as Variant;
 
-function party(variant: Variant = quick, seed = 42) {
+const code = (f: () => unknown) => {
+  try {
+    f();
+  } catch (e) {
+    return (e as { code: string }).code;
+  }
+  return "ok";
+};
+
+// Whether a text shows up anywhere in what a reader gets. Compares the JSON
+// forms, since a brief has newlines that JSON writes as \n.
+const shows = (body: unknown, text: string) =>
+  JSON.stringify(body).includes(JSON.stringify(text).slice(1, -1));
+
+function party(variant: Variant = quick, seed = "42") {
   let events = start(players, variant, T0, seed);
   let state = replay("m_abcdefghijkl", events);
   const run = (player: string, action: Parameters<typeof act>[2], at = 1) => {
@@ -103,16 +118,19 @@ describe("scoring", () => {
 
 describe("dealing", () => {
   it("deals the same hand from the same seed and a conflicted one", () => {
-    const a = deal(6, quick, 7);
-    expect(deal(6, quick, 7)).toEqual(a);
+    const a = deal(6, quick, "7");
+    expect(deal(6, quick, "7")).toEqual(a);
     expect(new Set(a.guests).size).toBe(6);
     expect(conflicted(a.feel)).toBe(true);
     for (let seed = 0; seed < 30; seed++)
-      expect(conflicted(deal(5, quick, seed).feel), `seed ${seed}`).toBe(true);
+      expect(
+        conflicted(deal(5, quick, String(seed)).feel),
+        `seed ${seed}`,
+      ).toBe(true);
   });
 
   it("gives each guest favourites, an avoid and an unrequited love", () => {
-    const d = deal(8, quick, 3);
+    const d = deal(8, quick, "3");
     d.feel.forEach((row, i) => {
       expect(row[i]).toBe(0);
       expect(
@@ -132,7 +150,7 @@ describe("dealing", () => {
   });
 
   it("writes a brief with exact numbers and keeps secrets quiet", () => {
-    const d = deal(6, quick, 11);
+    const d = deal(6, quick, "11");
     const b = briefFor(d, 0);
     expect(b.text).toContain(`You are ${d.guests[0]}`);
     expect(Object.keys(b.feelings)).toHaveLength(5);
@@ -142,6 +160,22 @@ describe("dealing", () => {
       const i = d.secret.findIndex((row) => row.some(Boolean));
       expect(briefFor(d, i).text).toContain("don't say why");
     }
+  });
+
+  it("draws from a 128-bit seed, the shown and private draws apart", () => {
+    const events = start(players, quick, T0);
+    const d = (
+      events.find((e) => e.body.kind === "deal")?.body as {
+        deal: { seed: string };
+      }
+    ).deal;
+    expect(d.seed).toMatch(/^[0-9a-f]{32}$/);
+    const a = rng("s", "guests");
+    const b = rng("s", "feelings");
+    const xs = Array.from({ length: 20 }, a);
+    expect(Array.from({ length: 20 }, b)).not.toEqual(xs);
+    expect(Array.from({ length: 20 }, rng("s", "guests"))).toEqual(xs);
+    expect(xs.every((x) => x >= 0 && x < 1)).toBe(true);
   });
 
   it("checks every variant and refuses a broken one", () => {
@@ -170,8 +204,19 @@ describe("a party", () => {
     const d = p.state.deal;
     expect(d).not.toBeNull();
     expect(JSON.stringify(alice)).not.toContain(`"seed"`);
-    const bobby = JSON.stringify(view(p.state, p.events, "bobby"));
-    expect(bobby).not.toContain(alice.you?.brief as string);
+    const briefs = players.map(
+      (who) => view(p.state, p.events, who).you?.brief as string,
+    );
+    expect(new Set(briefs).size).toBe(players.length);
+    expect(shows(alice, briefs[0] as string)).toBe(true);
+    players.forEach((who, i) => {
+      const seen = view(p.state, p.events, who);
+      briefs.forEach((b, j) => {
+        if (i !== j)
+          expect(shows(seen, b), `${who} sees brief ${j}`).toBe(false);
+      });
+    });
+    for (const b of briefs) expect(shows(JSON.parse(outsider), b)).toBe(false);
   });
 
   it("locks as soon as everyone backs one plan", () => {
@@ -206,14 +251,6 @@ describe("a party", () => {
   it("refuses bad seatings, repeats, outsiders and overlong talk", () => {
     const p = party();
     const g = p.state.guests;
-    const code = (f: () => unknown) => {
-      try {
-        f();
-      } catch (e) {
-        return (e as { code: string }).code;
-      }
-      return "ok";
-    };
     expect(
       code(() => p.run("alice", { kind: "propose", seating: g.slice(1) })),
     ).toBe("invalid_seating");
@@ -269,16 +306,34 @@ describe("a party", () => {
     p.run("alice", { kind: "talk", text: "one" });
     p.run("alice", { kind: "talk", text: "two" });
     expect(() => p.run("alice", { kind: "talk", text: "three" })).toThrow();
-    p.run("alice", { kind: "propose", seating: p.state.guests });
-    expect(() =>
-      p.run("alice", {
-        kind: "propose",
-        seating: [...p.state.guests]
-          .reverse()
-          .slice(1)
-          .concat(p.state.guests[5] as string),
-      }),
-    ).toThrow();
+    const g = p.state.guests;
+    p.run("alice", { kind: "propose", seating: g });
+    // A different seating, so only the cap can refuse it.
+    const other = [g[0], g[2], g[1], ...g.slice(3)] as string[];
+    expect(
+      code(() => p.run("alice", { kind: "propose", seating: other })),
+    ).toBe("proposal_limit");
+    expect(p.run("bobby", { kind: "propose", seating: other })).toHaveLength(1);
+  });
+
+  it("caps changes of backing per guest", () => {
+    const p = party({ ...quick, backs_per_guest: 3 });
+    const g = p.state.guests;
+    p.run("alice", { kind: "propose", seating: g });
+    p.run("bobby", {
+      kind: "propose",
+      seating: [g[1], g[0], ...g.slice(2)] as string[],
+    });
+    p.run("carol", { kind: "back", proposal: "P1" });
+    p.run("carol", { kind: "back", proposal: "P2" });
+    p.run("carol", { kind: "back", proposal: null });
+    expect(view(p.state, p.events, "carol").you?.backs_left).toBe(0);
+    expect(code(() => p.run("carol", { kind: "back", proposal: "P1" }))).toBe(
+      "backing_limit",
+    );
+    // Asking for what it already backs changes nothing, so it's no refusal.
+    expect(p.run("carol", { kind: "back", proposal: null })).toEqual([]);
+    expect(p.run("david", { kind: "back", proposal: "P1" })).toHaveLength(1);
   });
 
   it("falls back to the most backed plan at the deadline", () => {
@@ -312,6 +367,25 @@ describe("a party", () => {
     const again = replay(p.state.id, p.events);
     expect(again.end?.seating).toEqual(p.state.end?.seating);
     expect(new Set(p.state.end?.seating).size).toBe(6);
+    // Drawn from the seed: the same party played again draws the same,
+    // and other seeds draw differently.
+    const tied = (seed: string) => {
+      const q = party(quick, seed);
+      const h = q.state.guests;
+      q.run("alice", { kind: "propose", seating: h });
+      q.run("bobby", {
+        kind: "propose",
+        seating: [h[1], h[0], ...h.slice(2)] as string[],
+      });
+      q.tick(quick.talk_seconds);
+      expect(q.state.end?.how).toBe("random");
+      return (q.state.end?.seating ?? []).join();
+    };
+    expect(tied("42")).toBe((p.state.end?.seating ?? []).join());
+    const draws = new Set(
+      Array.from({ length: 12 }, (_, i) => tied(`other-${i}`)),
+    );
+    expect(draws.size).toBeGreaterThan(1);
   });
 
   it("lets the kind host seat everyone fairly when nobody agrees", () => {
@@ -342,7 +416,7 @@ describe("a party", () => {
 
   it("treats handles like constructor as players, not properties", () => {
     const odd = ["constructor", "__proto__x", "toString", "hasown"];
-    const events = start(odd, quick, T0, 5);
+    const events = start(odd, quick, T0, "5");
     const s = replay("m_abcdefghijkl", events);
     const added = act(
       s,

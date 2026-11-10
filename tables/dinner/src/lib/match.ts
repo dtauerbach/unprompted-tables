@@ -1,8 +1,7 @@
-import { randomInt } from "node:crypto";
 import { type VisibleEvent, visibleEvents } from "@unprompted-tables/game";
 import { ApiError } from "@unprompted-tables/server";
 import { briefFor, type Deal, deal } from "./deal";
-import { pick, rng } from "./rng";
+import { newSeed, pick, rng } from "./rng";
 import { bounds, canonical, type Report, report } from "./score";
 import { validTalk } from "./text";
 import { type Fallback, type Variant, variantSchema } from "./variants";
@@ -79,6 +78,7 @@ export type MatchState = {
   phase: "talk" | "over";
   opened: string;
   talks: Record<string, number>;
+  backs: Record<string, number>;
   proposals: Proposal[];
   backing: Record<string, string>;
   end: Extract<Body, { kind: "end" }> | null;
@@ -115,6 +115,7 @@ export function apply(s: MatchState, e: MatchEvent): MatchState {
         phase: "talk",
         opened: b.at,
         talks: {},
+        backs: {},
         proposals: [],
         backing: {},
         end: null,
@@ -148,7 +149,11 @@ export function apply(s: MatchState, e: MatchEvent): MatchState {
       const backing = { ...s.backing };
       if (b.proposal === null) delete backing[b.player];
       else backing[b.player] = b.proposal;
-      return { ...s, backing };
+      return {
+        ...s,
+        backing,
+        backs: { ...s.backs, [b.player]: (own(s.backs, b.player) ?? 0) + 1 },
+      };
     }
     case "end":
       return { ...s, phase: "over", end: b };
@@ -166,7 +171,7 @@ export function start(
   players: string[],
   variant: Variant,
   at: Date,
-  seed: number = randomInt(2 ** 31),
+  seed: string = newSeed(),
 ): MatchEvent[] {
   variant = variantSchema.parse(variant);
   if (new Set(players).size !== players.length || players.length < 4)
@@ -264,7 +269,7 @@ function close(s: MatchState, at: Date): MatchEvent {
       );
     } else {
       // Drawn from the match's private seed, so a replay draws the same.
-      const r = rng(d.seed ^ 0x5eed);
+      const r = rng(d.seed, "fallback");
       const rest = d.guests.map((_, i) => i).slice(1);
       for (let i = rest.length - 1; i > 0; i--) {
         const j = pick(r, i + 1);
@@ -357,6 +362,11 @@ export function act(
     )
       throw new ApiError(404, "no_such_proposal", "There's no such proposal.");
     if ((own(s.backing, player) ?? null) === action.proposal) return [];
+    if ((own(s.backs, player) ?? 0) >= v.backs_per_guest)
+      refuse(
+        "backing_limit",
+        `You've changed your backing ${v.backs_per_guest} times. It stays where it is.`,
+      );
     out = event({ kind: "back", at, player, proposal: action.proposal });
   }
   const next = apply(s, out);
@@ -387,6 +397,7 @@ export function view(
       messages_per_guest: v.messages_per_guest,
       message_chars: v.message_chars,
       proposals_per_guest: v.proposals_per_guest,
+      backs_per_guest: v.backs_per_guest,
     },
     guests: s.players.map((p, i) => ({
       guest: s.guests[i],
@@ -404,6 +415,8 @@ export function view(
             proposals_left:
               v.proposals_per_guest -
               s.proposals.filter((p) => p.by === player).length,
+            backs_left:
+              v.backs_per_guest - (own(s.backs, player as string) ?? 0),
             backing: own(s.backing, player as string) ?? null,
           }
         : null,
