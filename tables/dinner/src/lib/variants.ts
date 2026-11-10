@@ -1,5 +1,11 @@
 import { LIMITS } from "@unprompted-tables/spectator";
 import { z } from "zod";
+import {
+  DEFAULT_VARIANT,
+  EXEC_VARIANTS,
+  type ExecVariant,
+  execVariantSchema,
+} from "./exec/variants";
 
 // The game's particulars, kept as data so a new version of the party is a
 // new entry here, not new code. Each match records the variant it was
@@ -123,6 +129,9 @@ const classic: Variant = {
   lock: { consensus: "all", fallback: ["most_backed", "random"] },
 };
 
+// The first game's variants, deprecated: still selectable by DINNER_VARIANT
+// for now, never the default. New matches are the executive seating game
+// (exec/variants.ts).
 export const VARIANTS: Record<string, Variant> = {
   classic,
   // A short party for tests and quick runs.
@@ -145,11 +154,25 @@ export const VARIANTS: Record<string, Variant> = {
 
 for (const v of Object.values(VARIANTS)) variantSchema.parse(v);
 
-export function variantNamed(name: string): Variant {
-  const v = Object.hasOwn(VARIANTS, name) ? VARIANTS[name] : undefined;
+export type AnyVariant = Variant | ExecVariant;
+
+export function isExecVariant(v: AnyVariant): v is ExecVariant {
+  return "game" in v && v.game === "exec";
+}
+
+export function variantNamed(name: string = DEFAULT_VARIANT): AnyVariant {
+  const v = Object.hasOwn(EXEC_VARIANTS, name)
+    ? EXEC_VARIANTS[name]
+    : Object.hasOwn(VARIANTS, name)
+      ? VARIANTS[name]
+      : undefined;
   if (!v)
     throw new Error(
-      `DINNER_VARIANT ${JSON.stringify(name)} isn't one of ${Object.keys(VARIANTS).join(", ")}`,
+      `DINNER_VARIANT ${JSON.stringify(name)} isn't one of ${[...Object.keys(EXEC_VARIANTS), ...Object.keys(VARIANTS)].join(", ")}`,
     );
   return v;
+}
+
+export function parseVariant(v: AnyVariant): AnyVariant {
+  return isExecVariant(v) ? execVariantSchema.parse(v) : variantSchema.parse(v);
 }

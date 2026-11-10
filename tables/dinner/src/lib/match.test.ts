@@ -294,12 +294,27 @@ describe("a party", () => {
         }),
       ),
     ).toBe("too_long");
-    expect(
-      code(() => p.run("bobby", { kind: "talk", text: "bad\u0007" })),
-    ).toBe("invalid_text");
+    for (const text of [
+      "bad\u0007",
+      "\u{E0068}\u{E0069}",
+      "hi\u200b",
+      "\u202eevil",
+      "a\u2028b",
+      "\uE000",
+      "x\u2060y",
+      "\ud800",
+      "\u0000",
+    ])
+      expect(
+        code(() => p.run("bobby", { kind: "talk", text })),
+        JSON.stringify(text),
+      ).toBe("invalid_text");
     expect(code(() => p.run("bobby", { kind: "talk", text: "   " }))).toBe(
       "invalid_text",
     );
+    expect(() =>
+      p.run("bobby", { kind: "talk", text: "soft\u00ADhyphen" }),
+    ).toThrow("U+00AD");
     expect(p.run("alice", { kind: "back", proposal: "P1" })).toEqual([]);
     expect(
       code(() =>

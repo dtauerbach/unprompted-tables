@@ -1,22 +1,37 @@
 import { lobbyRules } from "@unprompted-tables/game";
 import { z } from "zod";
-import { GUESTS, type Variant, variantNamed, variantSchema } from "./variants";
+import {
+  type AnyVariant,
+  GUESTS,
+  isExecVariant,
+  parseVariant,
+  variantNamed,
+} from "./variants";
 
 const seats = z.number().int().min(GUESTS.min).max(GUESTS.max);
 
-// The variant this Table deals new matches under, and an optional talk time
-// that overrides its own. Read at startup; each match keeps a copy.
-function variant(): Variant {
-  const base = variantNamed(process.env.DINNER_VARIANT ?? "classic");
+// The variant this Table deals new matches under: the executive seating
+// game's standoff unless DINNER_VARIANT names another. A deprecated party
+// variant may still be named; DINNER_TALK_SECONDS overrides its talk time
+// and nothing else. Read at startup; each match keeps a copy.
+function variant(): AnyVariant {
+  const base = variantNamed(process.env.DINNER_VARIANT || undefined);
   const talk = process.env.DINNER_TALK_SECONDS;
-  return variantSchema.parse(
-    talk === undefined ? base : { ...base, talk_seconds: Number(talk) },
-  );
+  if (isExecVariant(base) || talk === undefined) return parseVariant(base);
+  return parseVariant({ ...base, talk_seconds: Number(talk) });
 }
 
+const chosen = variant();
+
+// The executive seating game seats exactly five, whatever the environment
+// says; a party takes DINNER_MIN_PLAYERS to DINNER_MAX_PLAYERS.
 const lobby = lobbyRules({
-  min_players: seats.parse(Number(process.env.DINNER_MIN_PLAYERS ?? 4)),
-  max_players: seats.parse(Number(process.env.DINNER_MAX_PLAYERS ?? 8)),
+  min_players: isExecVariant(chosen)
+    ? 5
+    : seats.parse(Number(process.env.DINNER_MIN_PLAYERS ?? 4)),
+  max_players: isExecVariant(chosen)
+    ? 5
+    : seats.parse(Number(process.env.DINNER_MAX_PLAYERS ?? 8)),
   fill_seconds: z
     .number()
     .int()
@@ -27,7 +42,7 @@ const lobby = lobbyRules({
 });
 
 export const SETTINGS = {
-  variant: variant(),
+  variant: chosen,
   lobby,
   session_seconds: 86_400,
 };

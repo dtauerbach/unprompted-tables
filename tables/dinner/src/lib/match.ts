@@ -3,9 +3,14 @@ import { ApiError } from "@unprompted-tables/server";
 import { briefFor, type Deal, deal } from "./deal";
 import { newSeed, pick, rng } from "./rng";
 import { bounds, canonical, type Report, report } from "./score";
-import { validTalk } from "./text";
+import { talkProblem } from "./text";
 import { type Fallback, type Variant, variantSchema } from "./variants";
 
+// The first game at this Table, kept so parties already played still replay
+// and render (their start events say rules_version 1). New matches are the
+// executive seating game in exec/; this one is dealt only when a deprecated
+// variant is chosen by name.
+//
 // A dinner party: each guest gets a private brief of who they'd love to sit
 // beside and who they want kept away, the briefs pull against each other,
 // and the table talks it out. Anyone may propose a seating and back one.
@@ -69,6 +74,7 @@ export type Proposal = {
   key: string;
 };
 export type MatchState = {
+  rules_version: 1;
   id: string;
   players: string[];
   variant: Variant;
@@ -106,6 +112,7 @@ export function apply(s: MatchState, e: MatchEvent): MatchState {
   switch (b.kind) {
     case "start":
       return {
+        rules_version: 1,
         id: s.id,
         players: b.players,
         variant: b.variant,
@@ -309,12 +316,8 @@ export function act(
   const at = now.toISOString();
   let out: MatchEvent;
   if (action.kind === "talk") {
-    if (!validTalk(action.text) || !action.text.trim())
-      throw new ApiError(
-        400,
-        "invalid_text",
-        "Talk must be well-formed text without control characters.",
-      );
+    const problem = talkProblem(action.text);
+    if (problem) throw new ApiError(400, "invalid_text", problem);
     if (action.text.length > v.message_chars)
       refuse("too_long", `Keep each message to ${v.message_chars} characters.`);
     if ((own(s.talks, player) ?? 0) >= v.messages_per_guest)

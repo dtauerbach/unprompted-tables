@@ -10,14 +10,15 @@ import { matchStartTime, now, tableNow } from "./clock";
 import { logFailure } from "./diagnostics";
 import {
   advance,
-  apply,
   due,
-  type MatchEvent,
-  type MatchState,
+  fold,
+  type AnyEvent as MatchEvent,
+  type AnyState as MatchState,
   replay,
+  resultOf,
   start,
   view,
-} from "./match";
+} from "./rules";
 import { GAME, LOBBY_LOCK, SETTINGS } from "./settings";
 
 // Matches in the database: their events, their results, and which are still
@@ -57,29 +58,9 @@ async function append(
       ON CONFLICT (match_id) DO UPDATE SET due = EXCLUDED.due, players = EXCLUDED.players`;
   else await tx`DELETE FROM open_matches WHERE match_id = ${id}`;
   const end = events.find((e) => e.body.kind === "end");
-  if (end && state.end) {
-    const result = {
-      game: GAME,
-      match: id,
-      at: state.end.at,
-      how: state.end.how,
-      seating: state.end.seating,
-      guests: state.guests.map((guest, i) => ({
-        guest,
-        player: state.players[i],
-        score: state.end?.report.scores[i],
-        satisfaction: state.end?.report.satisfaction[i],
-      })),
-      value_captured: state.end.report.value_captured,
-      worst_off: state.end.report.worst_off,
-    };
+  if (end && state.end)
     await tx`INSERT INTO results (match_id, result, at)
-      VALUES (${id}, ${tx.json(result)}, ${state.end.at})`;
-  }
-}
-
-function fold(state: MatchState, events: MatchEvent[]): MatchState {
-  return events.reduce(apply, state);
+      VALUES (${id}, ${tx.json(resultOf(GAME, id, state) as never)}, ${state.end.at})`;
 }
 
 // Runs fn on a match's state with its clock brought up to now, holding the
@@ -121,29 +102,36 @@ export async function withMatch<T>(
 // hold up the players. Only when a phase has run out does reading take the
 // lock and store the clock's events, and not when the Table is read-only:
 // then the closed phases show but aren't stored.
-export async function readMatch(id: string, player: string | null) {
-  return seeMatch(id, (state, events) => view(state, events, player));
+export async function readMatch(
+  id: string,
+  player: string | null,
+  ask?: string[],
+) {
+  return seeMatch(id, (state, events, at) =>
+    view(state, events, player, { now: at, ask }),
+  );
 }
 
 export async function seeMatch<T>(
   id: string,
-  project: (state: MatchState, events: MatchEvent[]) => T,
+  project: (state: MatchState, events: MatchEvent[], at: Date) => T,
 ): Promise<T> {
   if (!MATCH_ID_RE.test(id)) throw noSuchMatch(id);
   const seen = await db().begin(async (tx) => {
     const [row] = await tx`SELECT id FROM matches WHERE id = ${id}`;
     if (!row) throw noSuchMatch(id);
     const stored = await loadEvents(tx, id);
-    const late = advance(replay(id, stored), await tableNow(tx));
-    return { stored, late };
+    const at = await tableNow(tx);
+    const late = advance(replay(id, stored), at);
+    return { stored, late, at };
   });
   if (seen.late.length > 0 && !isReadOnly())
-    return withMatch(id, async (state, events) => ({
+    return withMatch(id, async (state, events, _tx, at) => ({
       events: [],
-      value: project(state, events),
+      value: project(state, events, at),
     }));
-  const { stored, late } = seen;
-  return project(fold(replay(id, stored), late), [...stored, ...late]);
+  const { stored, late, at } = seen;
+  return project(fold(replay(id, stored), late), [...stored, ...late], at);
 }
 
 function noSuchMatch(id: string): ApiError {

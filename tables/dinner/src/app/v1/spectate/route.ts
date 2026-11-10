@@ -14,14 +14,17 @@ export const GET = route(async () => {
       updated_at: Date;
       players: number;
       live: boolean;
-      summary: string | null;
+      result: { how?: string; round?: number; rules_version?: number } | null;
     }[]
   >`
     SELECT m.id, m.created_at AS started_at,
-      coalesce((SELECT max(recorded_at) FROM events e WHERE e.match_id = m.id), m.created_at) AS updated_at,
+      -- Public events only, by their own time: when a private message or a
+      -- sealed ballot came in is itself private while the match is on.
+      coalesce((SELECT max((e.body->'body'->>'at')::timestamptz) FROM events e
+        WHERE e.match_id = m.id AND e.body->'audience' = '"public"'::jsonb), m.created_at) AS updated_at,
       cardinality(m.players) AS players,
       (o.match_id IS NOT NULL) AS live,
-      r.result->>'how' AS summary
+      r.result
     FROM matches m
     LEFT JOIN open_matches o ON o.match_id = m.id
     LEFT JOIN results r ON r.match_id = m.id
@@ -31,13 +34,22 @@ export const GET = route(async () => {
     feedList(
       rows.map((r) => ({
         ...r,
-        summary: r.summary ? summaryOf(r.summary) : null,
+        summary: r.result ? summaryOf(r.result) : null,
       })),
     ),
   );
 });
 
-function summaryOf(how: string): string {
+function summaryOf(result: {
+  how?: string;
+  round?: number;
+  rules_version?: number;
+}): string {
+  const how = result.how ?? "";
+  if (result.rules_version === 2)
+    return how === "deal"
+      ? `Agreed in round ${result.round}.`
+      : "No deal: no seating passed.";
   if (how === "consensus") return "Seated by agreement.";
   if (how === "majority") return "Seated by a majority.";
   if (how === "most_backed") return "Time ran out; the most backed plan won.";

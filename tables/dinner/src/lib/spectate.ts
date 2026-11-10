@@ -7,6 +7,8 @@ import {
   visibleText,
 } from "@unprompted-tables/spectator";
 import { briefFor, type Deal } from "./deal";
+import { execFeed } from "./exec/feed";
+import type { ExecEvent } from "./exec/game";
 import {
   backers,
   due,
@@ -15,15 +17,24 @@ import {
   type MatchEvent,
   type MatchState,
 } from "./match";
+import { type AnyEvent, type AnyState, isExec } from "./rules";
+import { bounds, scores } from "./score";
 import { GAME, TABLE_NAME } from "./settings";
 
-// What people see of a party, in Unprompted's spectator format. Built only
-// from public events while the party is on: players read this feed too, so
-// no brief, feeling or deal reaches it until the end, when all are revealed.
+// What people see of a match, in Unprompted's spectator format. The
+// executive seating game's feed is in exec/feed.ts; the first party's, kept
+// for matches already played, is below. Built only from public events while
+// a party is on: players read this feed too, so no brief, feeling or deal
+// reaches it until the end, when all are revealed.
 
 const TABLE = { name: TABLE_NAME, game: GAME };
+
+export function feed(s: AnyState, events: AnyEvent[]): Feed {
+  return isExec(s)
+    ? execFeed(s, events as ExecEvent[], TABLE)
+    : partyFeed(s, events as MatchEvent[]);
+}
 const id = (guest: string) => guest.toLowerCase();
-const pct = (x: number) => `${Math.round(x * 100)}%`;
 const list = (s: string[]) => s.join(", ");
 
 function clock(iso: string): string {
@@ -42,7 +53,7 @@ const HOW: Record<string, string> = {
     "Time ran out with no clear favourite, so the seats were drawn at random.",
 };
 
-export function feed(s: MatchState, events: MatchEvent[]): Feed {
+function partyFeed(s: MatchState, events: MatchEvent[]): Feed {
   const guest = (player: string) => id(guestOf(s, player) ?? player);
   const timeline: Feed["timeline"] = [];
   const push = (e: Feed["timeline"][number]) => {
@@ -140,32 +151,52 @@ export function feed(s: MatchState, events: MatchEvent[]): Feed {
   };
 }
 
+// An ended party's bounds never change, and searching every seating on each
+// read of a public feed adds up, so they're kept per deal (by its feelings,
+// which are all they depend on), a few hundred deals at most.
+const BOUNDS = new Map<
+  string,
+  { b: ReturnType<typeof bounds>; fair: number[] }
+>();
+export function boundsOf(d: Deal) {
+  const key = JSON.stringify(d.feel);
+  let hit = BOUNDS.get(key);
+  if (!hit) {
+    const b = bounds(d.feel);
+    hit = { b, fair: scores(d.feel, b.fairest) };
+    if (BOUNDS.size >= 256) BOUNDS.delete(BOUNDS.keys().next().value as string);
+    BOUNDS.set(key, hit);
+  }
+  return hit;
+}
+
+// Every figure is a level a reader can check against the briefs: scores,
+// and what the best, the worst and the fairest seating would have given.
+// No percentages measured from the worst seating, which read 2 of a best 6
+// as "60%", and no columns of differences.
 function outcome(s: MatchState): NonNullable<Feed["outcome"]> {
   const end = s.end as NonNullable<MatchState["end"]>;
   const r = end.report;
   const d = end.deal as Deal;
-  const low = r.satisfaction.indexOf(r.worst_off);
+  const { b, fair } = boundsOf(d);
+  const total = r.scores.reduce((a, v) => a + v, 0);
+  const lowest = Math.min(...r.scores);
+  const low = r.scores.indexOf(lowest);
   return {
     summary:
-      `${(HOW[end.how] ?? "").replace("{p}", end.proposal ?? "")} ${d.guests[low]} came off worst, with ${pct(r.worst_off)} of what they could have had.`.trim(),
+      `${(HOW[end.how] ?? "").replace("{p}", end.proposal ?? "")} ${d.guests[low]} had the lowest score, ${lowest}, of a possible ${b.best[low]}.`.trim(),
     measures: [
       {
-        label: "Value captured",
-        value: r.value_captured,
-        format: "percent",
-        note: "How the table's total compares with the best and worst any seating gives.",
+        label: "Total score",
+        value: total,
+        format: "number",
+        note: `Every guest's score added up. The highest any seating gives is ${b.best_total}.`,
       },
       {
-        label: "Worst-off guest",
-        value: r.worst_off,
-        format: "percent",
-        note: "The least satisfied guest, against their own best and worst.",
-      },
-      {
-        label: "Best possible for the worst-off",
-        value: r.best_worst_off,
-        format: "percent",
-        note: "What the fairest seating would have given its least satisfied guest.",
+        label: "Lowest score",
+        value: lowest,
+        format: "number",
+        note: `The seating fairest by the briefs left its lowest guest with ${Math.min(...fair)}.`,
       },
       {
         label: "Swaps both would take",
@@ -178,47 +209,31 @@ function outcome(s: MatchState): NonNullable<Feed["outcome"]> {
       columns: [
         { key: "score", label: "Score", format: "number" },
         { key: "best", label: "Best possible", format: "number" },
-        { key: "satisfaction", label: "Satisfaction", format: "percent" },
-        {
-          key: "vs_fairest",
-          label: "Against fairest seating",
-          format: "percent",
-        },
+        { key: "worst", label: "Worst possible", format: "number" },
+        { key: "fairest", label: "Fairest seating gave", format: "number" },
       ],
       rows: s.guests.map((g, i) => ({
         participant: id(g),
         values: {
           score: r.scores[i] ?? null,
-          best: bestFor(d, i),
-          satisfaction: r.satisfaction[i] ?? null,
-          // Positive: better off than the fairest seating would have left them.
-          vs_fairest:
-            r.short_of_fairest[i] === undefined
-              ? null
-              : 0 - r.short_of_fairest[i],
+          best: b.best[i] ?? null,
+          worst: b.worst[i] ?? null,
+          fairest: fair[i] ?? null,
         },
       })),
     },
     reveals: s.guests.map((g, i) => {
-      const b = briefFor(d, i);
-      const numbers = Object.entries(b.feelings)
+      const brief = briefFor(d, i);
+      const numbers = Object.entries(brief.feelings)
         .map(([who, n]) => `${who} ${n > 0 ? "+" : ""}${n}`)
         .join(", ");
       return {
         participant: id(g),
         title: `${g}'s brief`,
-        text: visibleText(`${b.text}\n${numbers}`, LIMITS.reveal),
+        text: visibleText(`${brief.text}\n${numbers}`, LIMITS.reveal),
       };
     }),
   };
-}
-
-// A guest's best is their two favourite neighbours, which some seating gives.
-function bestFor(d: Deal, i: number): number {
-  const [a = 0, b = 0] = Object.values(briefFor(d, i).feelings).sort(
-    (x, y) => y - x,
-  );
-  return a + b;
 }
 
 export function feedList(
