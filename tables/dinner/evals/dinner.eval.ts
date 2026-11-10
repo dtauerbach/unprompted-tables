@@ -178,6 +178,26 @@ it("seats a dinner party through real passes, and keeps briefs from watchers", a
   );
   expect(feed.match.status).toBe("over");
   expect(feed.outcome?.reveals).toHaveLength(count);
+  // Every row reads on its own: satisfaction is where the score sits between
+  // that guest's worst and best, all three shown.
+  const keys = feed.outcome?.scores?.columns.map((c) => c.key) ?? [];
+  expect(keys.slice(0, 4)).toEqual(["score", "worst", "best", "satisfaction"]);
+  for (const r of feed.outcome?.scores?.rows ?? []) {
+    const v = r.values as {
+      score: number;
+      worst: number;
+      best: number;
+      satisfaction: number;
+    };
+    expect(v.satisfaction).toBeCloseTo(
+      v.best === v.worst ? 1 : (v.score - v.worst) / (v.best - v.worst),
+    );
+    // A column of nothing but 0% says nothing: it's left out instead.
+    if (keys.includes("vs_fairest"))
+      expect(
+        feed.outcome?.scores?.rows.some((x) => x.values.vs_fairest !== 0),
+      ).toBe(true);
+  }
   const list = listSchema.parse((await send(`${TABLE}/v1/spectate`)).json);
   expect(list.matches.some((m) => m.id === id)).toBe(true);
   writeFileSync(

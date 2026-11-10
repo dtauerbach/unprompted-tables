@@ -15,6 +15,7 @@ import {
   type MatchEvent,
   type MatchState,
 } from "./match";
+import { bounds, type Report } from "./score";
 import { GAME, TABLE_NAME } from "./settings";
 
 // What people see of a party, in Unprompted's spectator format. Built only
@@ -147,7 +148,7 @@ function outcome(s: MatchState): NonNullable<Feed["outcome"]> {
   const low = r.satisfaction.indexOf(r.worst_off);
   return {
     summary:
-      `${(HOW[end.how] ?? "").replace("{p}", end.proposal ?? "")} ${d.guests[low]} came off worst, with ${pct(r.worst_off)} of what they could have had.`.trim(),
+      `${(HOW[end.how] ?? "").replace("{p}", end.proposal ?? "")} ${d.guests[low]} came off worst, with ${pct(r.worst_off)} of what they could have had.${isFairest(r) ? " No seating would have left the worst-off guest better off." : ""}`.trim(),
     measures: [
       {
         label: "Value captured",
@@ -174,31 +175,7 @@ function outcome(s: MatchState): NonNullable<Feed["outcome"]> {
         note: "Pairs of guests who'd both be happier trading seats.",
       },
     ],
-    scores: {
-      columns: [
-        { key: "score", label: "Score", format: "number" },
-        { key: "best", label: "Best possible", format: "number" },
-        { key: "satisfaction", label: "Satisfaction", format: "percent" },
-        {
-          key: "vs_fairest",
-          label: "Against fairest seating",
-          format: "percent",
-        },
-      ],
-      rows: s.guests.map((g, i) => ({
-        participant: id(g),
-        values: {
-          score: r.scores[i] ?? null,
-          best: bestFor(d, i),
-          satisfaction: r.satisfaction[i] ?? null,
-          // Positive: better off than the fairest seating would have left them.
-          vs_fairest:
-            r.short_of_fairest[i] === undefined
-              ? null
-              : 0 - r.short_of_fairest[i],
-        },
-      })),
-    },
+    scores: scoreTable(s.guests, d, r),
     reveals: s.guests.map((g, i) => {
       const b = briefFor(d, i);
       const numbers = Object.entries(b.feelings)
@@ -213,12 +190,58 @@ function outcome(s: MatchState): NonNullable<Feed["outcome"]> {
   };
 }
 
-// A guest's best is their two favourite neighbours, which some seating gives.
-function bestFor(d: Deal, i: number): number {
-  const [a = 0, b = 0] = Object.values(briefFor(d, i).feelings).sort(
-    (x, y) => y - x,
-  );
-  return a + b;
+// Score, worst and best are all in the guest's own points, so a reader can
+// see where satisfaction comes from: Otto's 2 between -4 and 6 is 60%, not
+// 2 of 6. The fairest-seating column only shows when the seating differs
+// from the fairest one for someone; otherwise every row would read 0% and
+// the summary says it in words instead.
+export function scoreTable(
+  guests: readonly string[],
+  d: Pick<Deal, "feel">,
+  r: Pick<Report, "scores" | "satisfaction" | "short_of_fairest">,
+): NonNullable<NonNullable<Feed["outcome"]>["scores"]> {
+  const b = bounds(d.feel);
+  const fair = !isFairest(r);
+  return {
+    columns: [
+      { key: "score", label: "Score", format: "number" },
+      { key: "worst", label: "Worst possible", format: "number" },
+      { key: "best", label: "Best possible", format: "number" },
+      { key: "satisfaction", label: "Satisfaction", format: "percent" },
+      ...(fair
+        ? [
+            {
+              key: "vs_fairest",
+              label: "Against fairest seating",
+              format: "percent" as const,
+            },
+          ]
+        : []),
+    ],
+    rows: guests.map((g, i) => ({
+      participant: id(g),
+      values: {
+        score: r.scores[i] ?? null,
+        worst: b.worst[i] ?? null,
+        best: b.best[i] ?? null,
+        satisfaction: r.satisfaction[i] ?? null,
+        // Positive: better off than the fairest seating would have left them.
+        ...(fair
+          ? {
+              vs_fairest:
+                r.short_of_fairest[i] === undefined
+                  ? null
+                  : 0 - r.short_of_fairest[i],
+            }
+          : {}),
+      },
+    })),
+  };
+}
+
+// Every guest got exactly what the fairest seating gives them.
+function isFairest(r: Pick<Report, "short_of_fairest">): boolean {
+  return r.short_of_fairest.every((x) => Math.abs(x) < 1e-9);
 }
 
 export function feedList(
