@@ -87,226 +87,329 @@ async function signUp(tag: string, i: number, bot: string): Promise<Bot> {
   };
 }
 
-it("bargains a quick compromise to the predicted seating, and keeps briefs from watchers", async () => {
-  const tag = randomBytes(3).toString("hex");
-  const description = await send(`${TABLE}/v1`);
-  expect(description.json.rules_version).toBe(2);
-  expect(JSON.stringify(description.json)).not.toContain("compromise");
-  const count = description.json.seats[0].max as number;
-  expect(count).toBe(5);
-  const bots: Bot[] = [];
-  for (let i = 0; i < count; i++)
-    bots.push(await signUp(tag, i, description.json.bot));
-  const stranger = await signUp(tag, 99, description.json.bot);
-  for (const bot of bots)
-    await send(`${TABLE}/v1/queue`, { token: bot.session, method: "POST" });
-  const id = (await send(`${TABLE}/v1/me`, { token: bots[0]?.session })).json
-    .match as string;
-  expect(id).toMatch(/^m_/);
-  const read = (bot?: Bot, query = "") =>
-    send(`${TABLE}/v1/matches/${id}${query}`, { token: bot?.session });
-  const act = (bot: Bot, body: unknown) =>
-    send(`${TABLE}/v1/matches/${id}/actions`, { token: bot.session, body });
+// run-local.ts runs this file once per Table variant: EVAL_VARIANT says
+// which match to play (compromise unless it says mix).
+const MIX = process.env.EVAL_VARIANT === "mix";
 
-  const briefs = new Map<string, Brief>();
-  const seen = new Map<string, string>();
-  for (const bot of bots) {
-    const r = await read(bot);
-    expect(r.json.you.brief).toContain("You are");
-    expect(r.json.next_deadline.at).toBeTruthy();
-    briefs.set(bot.handle, r.json.you);
-    seen.set(bot.handle, JSON.stringify(r.json));
-  }
-  // JSON writes a brief's newlines as \n, so compare the JSON forms.
-  const asJson = (text: string) => JSON.stringify(text).slice(1, -1);
-  // Each assistant sees its own brief and nobody else's.
-  for (const [who, text] of seen)
-    for (const [whose, b] of briefs)
-      expect(text.includes(asJson(b.brief)), `${who} sees ${whose}`).toBe(
-        who === whose,
-      );
-  const live = (await read()).json;
-  const names = live.table.executives
-    .map((e: { executive: string }) => e.executive)
-    .sort() as string[];
-  const byName = new Map<string, Bot>(
-    bots.map((b) => [(briefs.get(b.handle) as Brief).executive, b]),
-  );
+// A cheat tries to pass words watchers can't see: hidden characters are
+// refused, and the refusal names the one to drop.
+async function cheat(act: (body: unknown) => ReturnType<typeof send>) {
+  const joined = await act({ kind: "talk", text: "deal? \u{1F91D}\u200D" });
+  expect(joined.status).toBe(400);
+  expect(joined.json.error.code).toBe("invalid_text");
+  expect(joined.json.error.message).toContain("U+200D");
+  const tagged = await act({
+    kind: "talk",
+    text: "\u{E0076}\u{E006F}\u{E0074}\u{E0065}",
+  });
+  expect(tagged.status).toBe(400);
+  expect(tagged.json.error.code).toBe("invalid_text");
+}
 
-  // Watchers and strangers learn nothing private while the match is on.
-  const watch = async () =>
-    JSON.stringify([
+it.runIf(MIX)(
+  "plays a quick mix to the end, keeping its configuration private until then",
+  async () => {
+    const tag = randomBytes(3).toString("hex");
+    const description = await send(`${TABLE}/v1`);
+    expect(description.json.rules_version).toBe(2);
+    const described = JSON.stringify(description.json);
+    for (const word of ["quick-mix", "standoff", "compromise", "aligned"])
+      expect(described).not.toContain(word);
+    const bots: Bot[] = [];
+    for (let i = 0; i < 5; i++)
+      bots.push(await signUp(`${tag}m`, i, description.json.bot));
+    for (const bot of bots)
+      await send(`${TABLE}/v1/queue`, { token: bot.session, method: "POST" });
+    const id = (await send(`${TABLE}/v1/me`, { token: bots[0]?.session })).json
+      .match as string;
+    expect(id).toMatch(/^m_/);
+    const read = (bot?: Bot) =>
+      send(`${TABLE}/v1/matches/${id}`, { token: bot?.session });
+    const act = (bot: Bot, body: unknown) =>
+      send(`${TABLE}/v1/matches/${id}/actions`, { token: bot.session, body });
+    await cheat((body) => act(bots[1] as Bot, body));
+
+    const briefs = new Map<string, Brief>();
+    for (const bot of bots) briefs.set(bot.handle, (await read(bot)).json.you);
+    const names = [...briefs.values()].map((b) => b.executive).sort();
+    const wishes: Wishes = new Map(
+      [...briefs.values()].map((b) => [b.executive, b.weights]),
+    );
+    // Everyone says what they want, and the proposer files the seating whose
+    // worst-off executive does best; everyone takes it.
+    for (const bot of bots) {
+      const me = briefs.get(bot.handle) as Brief;
+      await act(bot, {
+        kind: "talk",
+        text: `${me.executive}'s assistant. Wishes: ${JSON.stringify(me.weights)}`,
+      });
+    }
+    const live = JSON.stringify([
       (await send(`${TABLE}/v1/spectate/${id}`)).json,
-      (await read(stranger)).json,
-      (await send(`${TABLE}/v1/spectate`)).json,
+      (await read()).json,
     ]);
-  const spectated = await send(`${TABLE}/v1/spectate/${id}`);
-  expect(feedSchema.safeParse(spectated.json).success).toBe(true);
-  const watcherText = await watch();
-  for (const b of briefs.values())
-    expect(watcherText).not.toContain(asJson(b.brief));
-  expect(watcherText).not.toContain('"weights"');
-  expect(watcherText).not.toContain("compromise");
-  expect(
-    (await act(stranger, { kind: "talk", text: "let me sit" })).json.error.code,
-  ).toBe("not_seated");
-  expect((await read(stranger, `?seating=${names.join(",")}`)).status).toBe(
-    403,
-  );
-  expect(
-    (
-      await act(bots[0] as Bot, {
-        kind: "talk",
-        text: "x",
-        player: bots[1]?.handle,
-      })
-    ).status,
-  ).toBe(400);
-  expect(
-    (
-      await send(`${TABLE}/v1/matches/${id}/actions`, {
-        body: { kind: "talk", text: "x" },
-      })
-    ).status,
-  ).toBe(401);
-
-  // A private word changes nothing a watcher sees.
-  const [first, second] = names as [string, string];
-  expect(
-    (
-      await act(byName.get(first) as Bot, {
-        kind: "talk",
-        text: "a word in private",
-        to: [second],
-      })
-    ).status,
-  ).toBe(200);
-  expect(await watch()).not.toContain("a word in private");
-
-  // Each says what its executive wants.
-  for (const bot of bots) {
-    const me = briefs.get(bot.handle) as Brief;
-    const says = `I'm ${me.executive}'s assistant. Wishes: ${JSON.stringify(me.weights)}`;
-    expect((await act(bot, { kind: "talk", text: says })).status).toBe(200);
-  }
-  // Markup in talk reaches watchers as text, never as a tag.
-  const MARKUP =
-    '<script>alert("dinner")</script><a href="https://evil.example">x</a>';
-  expect(
-    (await act(bots[0] as Bot, { kind: "talk", text: MARKUP })).status,
-  ).toBe(200);
-
-  // Each reads the table's wishes for itself and works out the seating
-  // whose worst-off executive does best.
-  const planOf = async (bot: Bot) => {
-    const heard = (await read(bot)).json.talk as {
-      from: string;
-      to: string[] | null;
-      untrusted_text: string;
-    }[];
-    const wishes: Wishes = new Map();
-    for (const t of heard) {
-      const m = /Wishes: (\{.*\})$/.exec(t.untrusted_text);
-      if (m && t.to === null) wishes.set(t.from, JSON.parse(m[1] as string));
-    }
-    expect(wishes.size).toBe(5);
-    return fairest(names, wishes);
-  };
-  const plan = await planOf(bots[0] as Bot);
-
-  // Every assistant can check what the plan gives it before anything's filed.
-  for (const bot of bots) {
-    const me = briefs.get(bot.handle) as Brief;
-    const r = await read(bot, `?seating=${plan.join(",")}`);
-    expect(r.json.asked.your_points).toBe(
-      pointsOf(me.executive, me.weights, plan),
+    for (const word of ["quick-mix", "standoff", "compromise", '"aligned"'])
+      expect(live).not.toContain(word);
+    const plan = fairest(names, wishes);
+    const round = (await read()).json.round;
+    const byName = new Map<string, Bot>(
+      bots.map((b) => [(briefs.get(b.handle) as Brief).executive, b]),
     );
-  }
-
-  const round = (await read()).json.round;
-  expect(round.number).toBe(1);
-  const proposer = byName.get(round.proposer) as Bot;
-  const voters = bots.filter((b) => b !== proposer);
-  const early = await act(voters[0] as Bot, {
-    kind: "vote",
-    round: 1,
-    ballot: "yes",
-  });
-  expect(early.json.error.code).toBe("nothing_filed");
-  const filed = await act(proposer, {
-    kind: "propose",
-    round: 1,
-    seating: plan,
-  });
-  expect(filed.status).toBe(200);
-  expect(
-    (await act(proposer, { kind: "vote", round: 1, ballot: "yes" })).json.error
-      .code,
-  ).toBe("proposer_counts_as_yes");
-  // The ballots stay sealed until the round closes.
-  for (const [i, bot] of voters.entries()) {
-    const me = briefs.get(bot.handle) as Brief;
-    const view = (await read(bot)).json;
-    const mine = view.round.proposal.your_points as number;
-    expect(mine).toBe(pointsOf(me.executive, me.weights, plan));
-    const hoped = pointsOf(me.executive, me.weights, await planOf(bot));
-    const ballot = mine >= hoped ? "yes" : "no";
-    const r = await act(bot, { kind: "vote", round: 1, ballot });
-    expect(r.status).toBe(200);
-    if (i === 0) {
+    const proposer = byName.get(round.proposer) as Bot;
+    expect(
+      (await act(proposer, { kind: "propose", round: 1, seating: plan }))
+        .status,
+    ).toBe(200);
+    for (const bot of bots.filter((b) => b !== proposer))
       expect(
-        (await act(bot, { kind: "vote", round: 1, ballot: "no" })).json.error
-          .code,
-      ).toBe("already_voted");
-      expect(await watch()).not.toContain('"your_ballot"');
-    }
-  }
+        (await act(bot, { kind: "vote", round: 1, ballot: "yes" })).status,
+      ).toBe(200);
 
-  const final = (await read()).json;
-  expect(final.phase).toBe("over");
-  expect(final.result.how).toBe("deal");
-  expect(final.result.round).toBe(1);
-  expect(final.result.configuration.name).toBe("compromise");
-  // Theory's prediction, with this match's draws, is the seating they found.
-  const theory = final.result.benchmarks.theory;
-  expect(theory.round).toBe(1);
-  expect(theory.offers).toHaveLength(1);
-  expect(canonical(final.result.seating)).toBe(canonical(theory.offers[0]));
-  expect(canonical(final.result.seating)).toBe(canonical(plan));
-  expect(
-    final.result.executives.map((e: { points: number }) => e.points),
-  ).toEqual([7, 7, 7, 7, 7]);
-
-  const feed = feedSchema.parse(
-    (await send(`${TABLE}/v1/spectate/${id}`)).json,
-  );
-  expect(feed.match.status).toBe("over");
-  expect(feed.outcome?.reveals.length).toBe(5 + 1 + 2);
-  expect(JSON.stringify(feed)).toContain("a word in private");
-  const list = listSchema.parse((await send(`${TABLE}/v1/spectate`)).json);
-  expect(list.matches.find((m) => m.id === id)?.summary).toBe(
-    "Agreed in round 1.",
-  );
-  writeFileSync(
-    path.join(process.cwd(), "evals/out", `feed-${id}.json`),
-    JSON.stringify(feed, null, 2),
-  );
-  // A site that draws spectator feeds, started by run-local.ts with this
-  // Table in UNPROMPTED_LOCAL_TABLES, shows the match to people as plain text.
-  if (process.env.EVAL_SITE_WATCHES === "1") {
-    const page = await fetch(`${SITE}/play/dinner/${id}`);
-    expect(page.status).toBe(200);
-    const html = await page.text();
-    expect(html).toContain("How it ended");
-    for (const g of feed.participants) expect(html).toContain(g.label);
-    expect(html).toContain("&lt;script&gt;alert(");
-    expect(html).not.toContain('<script>alert("dinner")');
-    expect(html).not.toContain('href="https://evil.example"');
-    expect(await (await fetch(`${SITE}/play`)).text()).toContain(
-      `href="/play/dinner/${id}"`,
+    const final = (await read()).json;
+    expect(final.phase).toBe("over");
+    expect(final.result.how).toBe("deal");
+    expect(["aligned", "compromise", "standoff"]).toContain(
+      final.result.configuration.name,
     );
-  }
-  console.log(
-    `Match ${id} ended by ${final.result.how} in round ${final.result.round}; watch at ${SITE}/play/dinner/${id}`,
-  );
-});
+    const feed = feedSchema.parse(
+      (await send(`${TABLE}/v1/spectate/${id}`)).json,
+    );
+    expect(feed.outcome?.reveals.length).toBe(5 + 1 + 2);
+    expect(JSON.stringify(feed)).toContain(
+      `Configuration: ${final.result.configuration.name}`,
+    );
+    console.log(
+      `Mixed match ${id} dealt ${final.result.configuration.name}; agreed in round 1.`,
+    );
+  },
+);
+
+it.skipIf(MIX)(
+  "bargains a quick compromise to the predicted seating, and keeps briefs from watchers",
+  async () => {
+    const tag = randomBytes(3).toString("hex");
+    const description = await send(`${TABLE}/v1`);
+    expect(description.json.rules_version).toBe(2);
+    expect(JSON.stringify(description.json)).not.toContain("compromise");
+    const count = description.json.seats[0].max as number;
+    expect(count).toBe(5);
+    const bots: Bot[] = [];
+    for (let i = 0; i < count; i++)
+      bots.push(await signUp(tag, i, description.json.bot));
+    const stranger = await signUp(tag, 99, description.json.bot);
+    for (const bot of bots)
+      await send(`${TABLE}/v1/queue`, { token: bot.session, method: "POST" });
+    const id = (await send(`${TABLE}/v1/me`, { token: bots[0]?.session })).json
+      .match as string;
+    expect(id).toMatch(/^m_/);
+    const read = (bot?: Bot, query = "") =>
+      send(`${TABLE}/v1/matches/${id}${query}`, { token: bot?.session });
+    const act = (bot: Bot, body: unknown) =>
+      send(`${TABLE}/v1/matches/${id}/actions`, { token: bot.session, body });
+
+    const briefs = new Map<string, Brief>();
+    const seen = new Map<string, string>();
+    for (const bot of bots) {
+      const r = await read(bot);
+      expect(r.json.you.brief).toContain("You are");
+      expect(r.json.next_deadline.at).toBeTruthy();
+      briefs.set(bot.handle, r.json.you);
+      seen.set(bot.handle, JSON.stringify(r.json));
+    }
+    // JSON writes a brief's newlines as \n, so compare the JSON forms.
+    const asJson = (text: string) => JSON.stringify(text).slice(1, -1);
+    // Each assistant sees its own brief and nobody else's.
+    for (const [who, text] of seen)
+      for (const [whose, b] of briefs)
+        expect(text.includes(asJson(b.brief)), `${who} sees ${whose}`).toBe(
+          who === whose,
+        );
+    const live = (await read()).json;
+    const names = live.table.executives
+      .map((e: { executive: string }) => e.executive)
+      .sort() as string[];
+    const byName = new Map<string, Bot>(
+      bots.map((b) => [(briefs.get(b.handle) as Brief).executive, b]),
+    );
+
+    // Watchers and strangers learn nothing private while the match is on.
+    const watch = async () =>
+      JSON.stringify([
+        (await send(`${TABLE}/v1/spectate/${id}`)).json,
+        (await read(stranger)).json,
+        (await send(`${TABLE}/v1/spectate`)).json,
+      ]);
+    const spectated = await send(`${TABLE}/v1/spectate/${id}`);
+    expect(feedSchema.safeParse(spectated.json).success).toBe(true);
+    const watcherText = await watch();
+    for (const b of briefs.values())
+      expect(watcherText).not.toContain(asJson(b.brief));
+    expect(watcherText).not.toContain('"weights"');
+    expect(watcherText).not.toContain("compromise");
+    expect(
+      (await act(stranger, { kind: "talk", text: "let me sit" })).json.error
+        .code,
+    ).toBe("not_seated");
+    expect((await read(stranger, `?seating=${names.join(",")}`)).status).toBe(
+      403,
+    );
+    expect(
+      (
+        await act(bots[0] as Bot, {
+          kind: "talk",
+          text: "x",
+          player: bots[1]?.handle,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await send(`${TABLE}/v1/matches/${id}/actions`, {
+          body: { kind: "talk", text: "x" },
+        })
+      ).status,
+    ).toBe(401);
+
+    await cheat((body) => act(bots[2] as Bot, body));
+
+    // A private word changes nothing a watcher sees.
+    const [first, second] = names as [string, string];
+    expect(
+      (
+        await act(byName.get(first) as Bot, {
+          kind: "talk",
+          text: "a word in private",
+          to: [second],
+        })
+      ).status,
+    ).toBe(200);
+    expect(await watch()).not.toContain("a word in private");
+
+    // Each says what its executive wants.
+    for (const bot of bots) {
+      const me = briefs.get(bot.handle) as Brief;
+      const says = `I'm ${me.executive}'s assistant. Wishes: ${JSON.stringify(me.weights)}`;
+      expect((await act(bot, { kind: "talk", text: says })).status).toBe(200);
+    }
+    // Markup in talk reaches watchers as text, never as a tag.
+    const MARKUP =
+      '<script>alert("dinner")</script><a href="https://evil.example">x</a>';
+    expect(
+      (await act(bots[0] as Bot, { kind: "talk", text: MARKUP })).status,
+    ).toBe(200);
+
+    // Each reads the table's wishes for itself and works out the seating
+    // whose worst-off executive does best.
+    const planOf = async (bot: Bot) => {
+      const heard = (await read(bot)).json.talk as {
+        from: string;
+        to: string[] | null;
+        untrusted_text: string;
+      }[];
+      const wishes: Wishes = new Map();
+      for (const t of heard) {
+        const m = /Wishes: (\{.*\})$/.exec(t.untrusted_text);
+        if (m && t.to === null) wishes.set(t.from, JSON.parse(m[1] as string));
+      }
+      expect(wishes.size).toBe(5);
+      return fairest(names, wishes);
+    };
+    const plan = await planOf(bots[0] as Bot);
+
+    // Every assistant can check what the plan gives it before anything's filed.
+    for (const bot of bots) {
+      const me = briefs.get(bot.handle) as Brief;
+      const r = await read(bot, `?seating=${plan.join(",")}`);
+      expect(r.json.asked.your_points).toBe(
+        pointsOf(me.executive, me.weights, plan),
+      );
+    }
+
+    const round = (await read()).json.round;
+    expect(round.number).toBe(1);
+    const proposer = byName.get(round.proposer) as Bot;
+    const voters = bots.filter((b) => b !== proposer);
+    const early = await act(voters[0] as Bot, {
+      kind: "vote",
+      round: 1,
+      ballot: "yes",
+    });
+    expect(early.json.error.code).toBe("nothing_filed");
+    const filed = await act(proposer, {
+      kind: "propose",
+      round: 1,
+      seating: plan,
+    });
+    expect(filed.status).toBe(200);
+    expect(
+      (await act(proposer, { kind: "vote", round: 1, ballot: "yes" })).json
+        .error.code,
+    ).toBe("proposer_counts_as_yes");
+    // The ballots stay sealed until the round closes.
+    for (const [i, bot] of voters.entries()) {
+      const me = briefs.get(bot.handle) as Brief;
+      const view = (await read(bot)).json;
+      const mine = view.round.proposal.your_points as number;
+      expect(mine).toBe(pointsOf(me.executive, me.weights, plan));
+      const hoped = pointsOf(me.executive, me.weights, await planOf(bot));
+      const ballot = mine >= hoped ? "yes" : "no";
+      const r = await act(bot, { kind: "vote", round: 1, ballot });
+      expect(r.status).toBe(200);
+      if (i === 0) {
+        expect(
+          (await act(bot, { kind: "vote", round: 1, ballot: "no" })).json.error
+            .code,
+        ).toBe("already_voted");
+        expect(await watch()).not.toContain('"your_ballot"');
+      }
+    }
+
+    const final = (await read()).json;
+    expect(final.phase).toBe("over");
+    expect(final.result.how).toBe("deal");
+    expect(final.result.round).toBe(1);
+    expect(final.result.configuration.name).toBe("compromise");
+    // Theory's prediction, with this match's draws, is the seating they found.
+    const theory = final.result.benchmarks.theory;
+    expect(theory.round).toBe(1);
+    expect(theory.offers).toHaveLength(1);
+    expect(canonical(final.result.seating)).toBe(canonical(theory.offers[0]));
+    expect(canonical(final.result.seating)).toBe(canonical(plan));
+    expect(
+      final.result.executives.map((e: { points: number }) => e.points),
+    ).toEqual([7, 7, 7, 7, 7]);
+
+    const feed = feedSchema.parse(
+      (await send(`${TABLE}/v1/spectate/${id}`)).json,
+    );
+    expect(feed.match.status).toBe("over");
+    expect(feed.outcome?.reveals.length).toBe(5 + 1 + 2);
+    expect(JSON.stringify(feed)).toContain("a word in private");
+    const list = listSchema.parse((await send(`${TABLE}/v1/spectate`)).json);
+    expect(list.matches.find((m) => m.id === id)?.summary).toBe(
+      "Agreed in round 1.",
+    );
+    writeFileSync(
+      path.join(process.cwd(), "evals/out", `feed-${id}.json`),
+      JSON.stringify(feed, null, 2),
+    );
+    // A site that draws spectator feeds, started by run-local.ts with this
+    // Table in UNPROMPTED_LOCAL_TABLES, shows the match to people as plain text.
+    if (process.env.EVAL_SITE_WATCHES === "1") {
+      const page = await fetch(`${SITE}/play/dinner/${id}`);
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain("How it ended");
+      for (const g of feed.participants) expect(html).toContain(g.label);
+      expect(html).toContain("&lt;script&gt;alert(");
+      expect(html).not.toContain('<script>alert("dinner")');
+      expect(html).not.toContain('href="https://evil.example"');
+      expect(await (await fetch(`${SITE}/play`)).text()).toContain(
+        `href="/play/dinner/${id}"`,
+      );
+    }
+    console.log(
+      `Match ${id} ended by ${final.result.how} in round ${final.result.round}; watch at ${SITE}/play/dinner/${id}`,
+    );
+  },
+);

@@ -143,6 +143,16 @@ export const EXEC_VARIANTS: Record<string, ExecVariant> = {
       { config: "standoff", weight: 2 },
     ],
   },
+  // For scripted evals: the same mix with short clocks.
+  "quick-mix": {
+    ...variant("standoff", "quick-mix"),
+    config: [
+      { config: "aligned", weight: 1 },
+      { config: "compromise", weight: 1 },
+      { config: "standoff", weight: 2 },
+    ],
+    clocks: { first: QUICK, later: QUICK },
+  },
   // For scripted evals and tests: a compromise with short clocks.
   "quick-compromise": {
     ...variant("compromise", "quick-compromise"),

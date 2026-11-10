@@ -131,21 +131,37 @@ try {
   };
   await run(tableDir, ["run", "migrate"], tableEnv, "table-migrate");
   await run(tableDir, ["run", "build"], tableEnv, "table-build");
-  await ready(
-    "http://localhost:3003/v1",
-    launch(tableDir, ["start"], tableEnv, "table"),
-  );
-  await run(
-    tableDir,
-    ["run", "eval"],
-    {
-      ...baseEnv,
-      EVAL_SITE_URL: "http://localhost:3000",
-      EVAL_TABLE_URL: "http://localhost:3003",
-      EVAL_SITE_WATCHES: watches ? "1" : "0",
-    },
-    "eval",
-  );
+  // A quick compromise first, then a quick mix, each on a fresh start of
+  // the Table under that variant.
+  for (const [variant, label] of [
+    ["quick-compromise", "compromise"],
+    ["quick-mix", "mix"],
+  ] as const) {
+    const table = launch(
+      tableDir,
+      ["start"],
+      { ...tableEnv, DINNER_VARIANT: variant },
+      `table-${label}`,
+    );
+    await ready("http://localhost:3003/v1", table);
+    await run(
+      tableDir,
+      ["run", "eval"],
+      {
+        ...baseEnv,
+        EVAL_SITE_URL: "http://localhost:3000",
+        EVAL_TABLE_URL: "http://localhost:3003",
+        EVAL_SITE_WATCHES: watches ? "1" : "0",
+        EVAL_VARIANT: label,
+      },
+      `eval-${label}`,
+    );
+    if (label === "mix" && process.env.KEEP_SERVERS === "1") break;
+    // Stop this Table before the next one takes the port.
+    const gone = new Promise((resolve) => table.once("exit", resolve));
+    if (table.pid) process.kill(-table.pid, "SIGTERM");
+    await gone;
+  }
   console.log(`Dinner table end-to-end eval passed. Logs: ${logs}`);
   // KEEP_SERVERS=1 leaves both running to look at, until Ctrl-C.
   if (process.env.KEEP_SERVERS === "1")

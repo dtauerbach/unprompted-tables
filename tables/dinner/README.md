@@ -53,6 +53,7 @@ games run the standoff.
 | `scramble` | 3 | majority |
 | `quick-compromise` | 1, with clocks of 0, 60 and 30 seconds for evals | unanimity |
 | `exec-mix` | 0, 1 or 2, drawn per match | unanimity |
+| `quick-mix` | the same, with the eval clocks | unanimity |
 
 The clocks are 180/420/300 seconds (`talk_min`/`propose_by`/`vote_seconds`) in
 round 1 and 60/240/300 in rounds 2 and 3. The limit is 40 messages of up to 600
@@ -101,4 +102,12 @@ possible and what the fairest seating gave them, with no percentages.
   `SITE_DIR=../unprompted npx tsx tables/dinner/evals/run-local.ts`, with
   `KEEP_SERVERS=1` to leave both running; the match is then at
   http://localhost:3000/play. Scripted bots play a quick compromise and must
-  reach the predicted seating.
+  reach the predicted seating, then a quick mix (`quick-mix`) to a deal; a
+  cheat's hidden characters must be refused in both.
+
+## Follow-ups
+
+- A configuration is pinned to one voting rule; letting a variant run a
+  configuration under the other rule is left for later.
+- The twin-world tests compare views and feeds, but not the answers to
+  `?seating=` questions; twinning those is still to do.
