@@ -231,6 +231,34 @@ describe("the executive seating game over HTTP", () => {
     expect((await t.read(voter)).talk).toEqual([]);
   });
 
+  it("closes a round once when the four ballots arrive together", async () => {
+    const t = await table();
+    const p = await t.proposer();
+    await t.act(p, { kind: "propose", round: 1, seating: EXECUTIVES });
+    const voters = handles.filter((h) => h !== p);
+    const answers = await Promise.all(
+      voters.map((h) => t.act(h, { kind: "vote", round: 1, ballot: "yes" })),
+    );
+    expect(answers.map((a) => a.status)).toEqual([200, 200, 200, 200]);
+    const done = await t.read();
+    expect(done.phase).toBe("over");
+    expect(done.result.how).toBe("deal");
+    expect(done.rounds).toHaveLength(1);
+    expect(done.rounds[0]).toMatchObject({ yes: 5, no: 0, passed: true });
+    const kinds = await db()<{ kind: string; n: number }[]>`
+      SELECT kind, count(*)::int AS n FROM events
+      WHERE match_id = ${t.id} AND kind IN ('back', 'round', 'end')
+      GROUP BY kind ORDER BY kind`;
+    // One opening and one close of round 1, four ballots, one end.
+    expect(kinds).toEqual([
+      { kind: "back", n: 4 },
+      { kind: "end", n: 1 },
+      { kind: "round", n: 2 },
+    ]);
+    expect(await countRows("results")).toBe(1);
+    expect(await countRows("open_matches")).toBe(0);
+  });
+
   it("runs the rounds by the clock and keeps the schedule's index current", async () => {
     const t = await table();
     const [opened] = await db()<{ due: Date }[]>`SELECT due FROM open_matches`;
@@ -292,6 +320,13 @@ describe("a party played under the first rules", () => {
       VALUES (${id}, ${players}, now())`;
     const live = await call(getMatch, { params: { id } });
     expect(live.body.guests).toHaveLength(4);
+    // The old party answers no seating questions.
+    const asked = await call(getMatch, {
+      params: { id },
+      path: `/v1/matches/${id}?seating=Ada,Basil,Cleo,Dev`,
+    });
+    expect(asked.status).toBe(400);
+    expect(asked.body.error.code).toBe("unknown_question");
     moveClock(200_000);
     const over = await call(getMatch, { params: { id } });
     expect(over.body.phase).toBe("over");
