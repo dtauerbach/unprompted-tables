@@ -158,7 +158,7 @@ const BOUNDS = new Map<
   string,
   { b: ReturnType<typeof bounds>; fair: number[] }
 >();
-function boundsOf(d: Deal) {
+export function boundsOf(d: Deal) {
   const key = JSON.stringify(d.feel);
   let hit = BOUNDS.get(key);
   if (!hit) {
