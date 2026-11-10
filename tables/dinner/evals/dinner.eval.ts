@@ -281,7 +281,7 @@ it("bargains a quick compromise to the predicted seating, and keeps briefs from 
     (await send(`${TABLE}/v1/spectate/${id}`)).json,
   );
   expect(feed.match.status).toBe("over");
-  expect(feed.outcome?.reveals.length).toBe(5 + 1 + 1);
+  expect(feed.outcome?.reveals.length).toBe(5 + 1 + 2);
   expect(JSON.stringify(feed)).toContain("a word in private");
   const list = listSchema.parse((await send(`${TABLE}/v1/spectate`)).json);
   expect(list.matches.find((m) => m.id === id)?.summary).toBe(

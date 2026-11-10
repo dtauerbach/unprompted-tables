@@ -28,7 +28,10 @@ export type Benchmarks = {
   no_deal: number[];
   highest_total: number;
   // Leximin on each executive's share of their own best.
-  fairest: { lowest: number; seatings: string[][] };
+  // The lowest executive's points over the fairest seatings: lowest to
+  // lowest_max when tied seatings differ (absent in matches ended before
+  // it was kept, where the two are equal).
+  fairest: { lowest: number; lowest_max?: number; seatings: string[][] };
   nash: { seatings: string[][]; points: string[]; lottery: string[] | null };
   pareto: { count: number; seatings: string[][] };
   core: {
@@ -107,7 +110,9 @@ export function benchmarks(opts: {
   const total = (x: number) =>
     (t.points[x] as number[]).reduce((a, b) => a + b, 0);
   let share: Q | null = null;
-  if (p) {
+  // No share of nothing: a seating where nobody scores has no split.
+  const offers = p?.cell.offers ?? [];
+  if (p && offers.length > 0 && offers.every((x) => total(x) > 0)) {
     const own = p.cell.own as number;
     share = div(
       sum(p.cell.offers.map((x) => q(own, total(x)))),
@@ -129,7 +134,11 @@ export function benchmarks(opts: {
     worst: t.worst,
     no_deal: t.noDeal,
     highest_total: ut.total,
-    fairest: { lowest: fair.lowest, seatings: list(fair.seatings) },
+    fairest: {
+      lowest: fair.lowest,
+      lowest_max: fair.lowest_max,
+      seatings: list(fair.seatings),
+    },
     nash: {
       seatings: list(nb.seatings),
       points: nashPoints,

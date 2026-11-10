@@ -151,6 +151,25 @@ function partyFeed(s: MatchState, events: MatchEvent[]): Feed {
   };
 }
 
+// An ended party's bounds never change, and searching every seating on each
+// read of a public feed adds up, so they're kept per deal (by its feelings,
+// which are all they depend on), a few hundred deals at most.
+const BOUNDS = new Map<
+  string,
+  { b: ReturnType<typeof bounds>; fair: number[] }
+>();
+function boundsOf(d: Deal) {
+  const key = JSON.stringify(d.feel);
+  let hit = BOUNDS.get(key);
+  if (!hit) {
+    const b = bounds(d.feel);
+    hit = { b, fair: scores(d.feel, b.fairest) };
+    if (BOUNDS.size >= 256) BOUNDS.delete(BOUNDS.keys().next().value as string);
+    BOUNDS.set(key, hit);
+  }
+  return hit;
+}
+
 // Every figure is a level a reader can check against the briefs: scores,
 // and what the best, the worst and the fairest seating would have given.
 // No percentages measured from the worst seating, which read 2 of a best 6
@@ -159,8 +178,7 @@ function outcome(s: MatchState): NonNullable<Feed["outcome"]> {
   const end = s.end as NonNullable<MatchState["end"]>;
   const r = end.report;
   const d = end.deal as Deal;
-  const b = bounds(d.feel);
-  const fair = scores(d.feel, b.fairest);
+  const { b, fair } = boundsOf(d);
   const total = r.scores.reduce((a, v) => a + v, 0);
   const lowest = Math.min(...r.scores);
   const low = r.scores.indexOf(lowest);

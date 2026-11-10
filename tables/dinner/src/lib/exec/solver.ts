@@ -136,15 +136,23 @@ function lexi(a: Q[], b: Q[]): number {
 }
 
 // Max-min with ties broken by the next lowest and so on (leximin), on
-// points as a share of each executive's own best.
-export function maxmin(t: Table): { lowest: number; seatings: number[] } {
+// points as a share of each executive's own best. Tied seatings share their
+// sorted shares but, when bests differ, not always their lowest points, so
+// `lowest` and `lowest_max` bound the lowest points over all of them.
+export function maxmin(t: Table): {
+  lowest: number;
+  lowest_max: number;
+  seatings: number[];
+} {
   const keys = range(t.seatings.length).map((x) => shares(t, x));
   const top = keys.reduce((a, b) => (lexi(b, a) > 0 ? b : a));
   const seatings = range(t.seatings.length).filter(
     (x) => lexi(keys[x] as Q[], top) === 0,
   );
+  const lows = seatings.map((x) => Math.min(...(t.points[x] as number[])));
   return {
-    lowest: Math.min(...(t.points[seatings[0] as number] as number[])),
+    lowest: Math.min(...lows),
+    lowest_max: Math.max(...lows),
     seatings,
   };
 }
@@ -159,7 +167,8 @@ export function fairGap(t: Table): Q {
 }
 
 export function totalGap(t: Table): Q {
-  return sub(q(1), q(utilitarian(t).total, total(t.best)));
+  const most = total(t.best);
+  return most === 0 ? ZERO : sub(q(1), q(utilitarian(t).total, most));
 }
 
 export function nashProduct(t: Table, x: number): bigint {

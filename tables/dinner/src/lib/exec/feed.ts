@@ -92,9 +92,11 @@ export function execFeed(
         at: b.at,
         kind: "talk",
         by: by(b.player),
-        text: to
-          ? `(Private, to ${words(to.map((x) => `${x}'s assistant`))}) ${visibleText(b.text)}`
-          : visibleText(b.text),
+        text: visibleText(
+          to
+            ? `(Private, to ${words(to.map((x) => `${x}'s assistant`))}) ${b.text}`
+            : b.text,
+        ),
       });
     } else if (b.kind === "propose") {
       const c = b.round === 1 ? s.rules.clocks.first : s.rules.clocks.later;
@@ -309,12 +311,17 @@ function outcome(
         format: "number",
         note: `Best possible ${bm.best[proposer]}. Theory without talk: ${inRound?.passes ? `${inRound.own} for this proposer` : "this proposer's round fails"}.`,
       },
-      {
-        label: "Proposer's share of all points",
-        value: total ? mine / total : 0,
-        format: "percent",
-        note: `An even split is 20%.${th.proposer_share ? ` Theory without talk: ${pct(value(th.proposer_share))}.` : ""}`,
-      },
+      // No share of nothing: left out when nobody scored.
+      ...(total > 0
+        ? [
+            {
+              label: "Proposer's share of all points",
+              value: mine / total,
+              format: "percent" as const,
+              note: `An even split is 20%.${th.proposer_share ? ` Theory without talk: ${pct(value(th.proposer_share))}.` : ""}`,
+            },
+          ]
+        : []),
       {
         label: "Total points",
         value: total,
@@ -325,7 +332,7 @@ function outcome(
         label: "Lowest executive's points",
         value: Math.min(...pts),
         format: "number",
-        note: `The fairest seating leaves its lowest executive with ${bm.fairest.lowest}.`,
+        note: `The fairest seating leaves its lowest executive with ${fairestLowest(bm)}.`,
       },
       {
         label: "Seatings better for some and worse for none",
@@ -415,7 +422,7 @@ function outcome(
     reveals: [
       ...EXECUTIVES.map((x, i) => executiveReveal(s, d, end, x, i)),
       ...s.closed.map((r) => roundReveal(d, bm, r)),
-      theoryReveal(s, d, bm),
+      ...theoryReveal(s, d, bm),
     ],
   };
 }
@@ -475,7 +482,9 @@ function roundReveal(
   lines.push(theory);
   return {
     participant: assistant(r.proposer),
-    title: `Round ${r.number}: ${who}'s assistant proposed`,
+    title: r.filing
+      ? `Round ${r.number}: ${who}'s assistant proposed`
+      : `Round ${r.number}: ${who}'s assistant filed nothing`,
     text: visibleText(lines.join("\n"), LIMITS.reveal),
   };
 }
@@ -497,14 +506,29 @@ function theoryReveal(s: ExecState, d: ExecDeal, bm: Benchmarks) {
     `Proposer draws: ${draws}.`,
     `No-talk prediction with these draws: ${prediction}. Before any draw: ${vec(th.before_draw)}.`,
     "It assumes full information (every brief known to all, which here is private), voters who say yes when a seating is worth at least going on, and a proposer who settles when indifferent and, among seatings equally good for them, offers the one best for the others.",
+  ];
+  const yardsticks = [
     `Nash bargaining seating${bm.nash.seatings.length === 1 ? "" : "s"} (largest product of gains over no deal): ${spell(bm.nash.seatings, 4, "; ")}; ${bm.nash.seatings.length === 1 ? "points" : "average points over them"} ${vec(bm.nash.points)}.`,
-    `Fairest seating${bm.fairest.seatings.length === 1 ? "" : "s"} (best lowest share of own best): ${spell(bm.fairest.seatings, 4, "; ")}; its lowest executive gets ${bm.fairest.lowest}.`,
+    `Fairest seating${bm.fairest.seatings.length === 1 ? "" : "s"} (best lowest share of own best): ${spell(bm.fairest.seatings, 4, "; ")}; its lowest executive gets ${fairestLowest(bm)}.`,
     `Pareto frontier: ${bm.pareto.count} of 60 seatings${bm.pareto.seatings.length ? `: ${spell(bm.pareto.seatings, 6, "; ")}` : ""}.`,
     `Core (seatings no group of that size would all rather replace): ${bm.core.majority} under 3 of 5${bm.core.majority_seatings.length ? ` (${spell(bm.core.majority_seatings, 4, "; ")})` : ""}, ${bm.core.four} under 4 of 5, ${bm.core.unanimity} under 5 of 5.`,
   ];
-  return {
-    participant: person(SPEAKER),
-    title: "The theory",
-    text: visibleText(lines.join("\n"), LIMITS.reveal),
-  };
+  // Two reveals, so neither comes near the reveal limit and is cut.
+  return [
+    {
+      participant: person(SPEAKER),
+      title: "The theory",
+      text: visibleText(lines.join("\n"), LIMITS.reveal),
+    },
+    {
+      participant: person(SPEAKER),
+      title: "The yardsticks",
+      text: visibleText(yardsticks.join("\n"), LIMITS.reveal),
+    },
+  ];
+}
+
+function fairestLowest(bm: Benchmarks): string {
+  const { lowest, lowest_max: most = lowest } = bm.fairest;
+  return most === lowest ? `${lowest}` : `${lowest} to ${most}`;
 }

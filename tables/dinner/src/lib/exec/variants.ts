@@ -30,9 +30,13 @@ export type Clock = z.infer<typeof clock>;
 // announcements, plus every reveal at its limit. Kept generous; a test plays
 // a match at its worst and checks this is never under.
 const ENTRY = 120;
+// Room left in a timeline entry for the longest private-message mark:
+// "(Private, to " plus four "X's assistant" names, and the closing ") ".
+export const MAX_MESSAGE_CHARS = LIMITS.text - 200;
 const PRIVATE_MARK = 120;
 const ROUND = 4 * (300 + ENTRY);
-const REVEALS = (5 + 1) * 3 * LIMITS.reveal;
+// Five briefs, the theory and the yardsticks; each round has its own.
+const REVEALS = (5 + 2) * 3 * LIMITS.reveal;
 export function execFeedBytes(v: {
   rounds: number;
   messages_per_assistant: number;
@@ -59,7 +63,9 @@ export const execVariantSchema = z
     clocks: z.strictObject({ first: clock, later: clock }),
     // Open and private messages together, per assistant.
     messages_per_assistant: int(1, 200),
-    message_chars: int(50, 4000),
+    // A private message's whole feed entry, marked with its recipients,
+    // must fit one timeline entry.
+    message_chars: int(50, MAX_MESSAGE_CHARS),
     // No deal: every executive gets their worst possible seating minus this.
     no_deal_margin: int(1, 100),
   })

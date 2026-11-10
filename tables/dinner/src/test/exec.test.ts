@@ -149,7 +149,7 @@ describe("the executive seating game over HTTP", () => {
       (await call(spectateOne, { params: { id: t.id } })).body,
     );
     expect(feed.match.status).toBe("over");
-    expect(feed.outcome?.reveals.length).toBe(5 + 1 + 1);
+    expect(feed.outcome?.reveals.length).toBe(5 + 1 + 2);
     const list = listSchema.parse((await call(spectateList)).body);
     expect(list.matches[0]?.summary).toBe("Agreed in round 1.");
     const late = await t.act(p, { kind: "talk", text: "hello?" });

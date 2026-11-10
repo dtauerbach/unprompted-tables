@@ -1,5 +1,7 @@
 import { feedSchema, LIMITS } from "@unprompted-tables/spectator";
 import { describe, expect, it } from "vitest";
+import { benchmarks } from "./benchmarks";
+import { CONFIGURATIONS } from "./configs";
 import { execFeed } from "./feed";
 import {
   act,
@@ -19,6 +21,7 @@ import {
   type ExecVariant,
   execFeedBytes,
   execVariantSchema,
+  MAX_MESSAGE_CHARS,
 } from "./variants";
 
 // The spectator feed of the executive seating game. Players can read it,
@@ -57,6 +60,11 @@ function match(variant: ExecVariant, seed = "feed-seed") {
       return events;
     },
     feed: () => feedSchema.parse(execFeed(state, events, TABLE)),
+    // Start over from these events (for a deal changed by hand).
+    replace(next: ExecEvent[]) {
+      events = next;
+      state = replay("m_abcdefghijkl", next);
+    },
     of: (x: string) => playerOf(state, EXECUTIVES.indexOf(x)),
     proposer: () => playerOf(state, state.round?.proposer as number),
     voters: () =>
@@ -279,6 +287,7 @@ describe("the finished feed", () => {
       `${EXECUTIVES[g.state.closed[0]?.proposer as number]?.toLowerCase()}-assistant`,
       `${EXECUTIVES[g.state.closed[1]?.proposer as number]?.toLowerCase()}-assistant`,
       "sage",
+      "sage",
     ]);
     for (const r of o?.reveals ?? [])
       expect(r.text.length).toBeLessThanOrEqual(LIMITS.reveal);
@@ -286,11 +295,16 @@ describe("the finished feed", () => {
       const brief = view(g.state, g.events.slice(0, 10), p).you?.brief ?? "";
       expect(o?.reveals.some((r) => r.text.startsWith(brief))).toBe(true);
     }
-    const sage = o?.reveals.at(-1)?.text ?? "";
-    expect(sage).toContain("Configuration: compromise (conflict level 1)");
-    expect(sage).toContain("Proposer draws:");
-    expect(sage).toContain("full information");
-    expect(sage).toContain("Pareto frontier: 16 of 60");
+    const [theory, yardsticks] = (o?.reveals.slice(-2) ?? []).map(
+      (r) => r.text,
+    ) as [string, string];
+    expect(o?.reveals.at(-2)?.title).toBe("The theory");
+    expect(o?.reveals.at(-1)?.title).toBe("The yardsticks");
+    expect(theory).toContain("Configuration: compromise (conflict level 1)");
+    expect(theory).toContain("Proposer draws:");
+    expect(theory).toContain("full information");
+    expect(yardsticks).toContain("Pareto frontier: 16 of 60");
+    expect(yardsticks).toContain("Nash bargaining seating");
     expect(o?.reveals[5]?.text).toContain("Failed 1-2, 2 not cast.");
   });
 
@@ -317,7 +331,7 @@ describe("the finished feed", () => {
     expect((f.board as { title: string }).title).toBe(
       "Round 1 proposal, rejected 1-1, 3 not cast",
     );
-    expect(f.outcome?.reveals).toHaveLength(5 + 3 + 1);
+    expect(f.outcome?.reveals).toHaveLength(5 + 3 + 2);
   });
 
   it("fits watchers whole at its worst", () => {
@@ -355,5 +369,133 @@ describe("the finished feed", () => {
     expect(r.error?.issues.map((i) => i.message)).toEqual([
       "a full match's feed would be too big for watchers",
     ]);
+  });
+});
+
+describe("text that must not be cut", () => {
+  // visibleText cuts at the limit, so text shorter than it was not cut.
+  function uncut(f: ReturnType<ReturnType<typeof match>["feed"]>) {
+    const o = f.outcome;
+    expect(o).not.toBeNull();
+    for (const r of o?.reveals ?? [])
+      expect(r.text.length, r.title).toBeLessThan(LIMITS.reveal - 200);
+    expect(o?.summary.length).toBeLessThan(LIMITS.summary);
+    for (const m of o?.measures ?? [])
+      expect(m.note?.length ?? 0, m.label).toBeLessThan(LIMITS.label * 2);
+  }
+
+  it("leaves every reveal, summary and note whole in every configuration", () => {
+    for (const config of Object.keys(CONFIGURATIONS))
+      for (const seed of ["cut-1", "cut-2", "cut-3"]) {
+        // Three rounds that fail with filings, the longest reveals.
+        const failing = match(quick(config), seed);
+        for (let r = 0; r < 3; r++) {
+          failing.file(1 + r * 31);
+          failing.vote(["no", "no", "no", "no"], 2 + r * 31);
+        }
+        uncut(failing.feed());
+        // Nothing filed at all.
+        const silent = match(quick(config), seed);
+        silent.tick(200);
+        uncut(silent.feed());
+        // A deal in round 1.
+        const agreed = match(quick(config), seed);
+        agreed.file(1);
+        agreed.vote(["yes", "yes", "yes", "yes"], 2);
+        expect(agreed.state.phase).toBe("over");
+        uncut(agreed.feed());
+      }
+  });
+
+  it("keeps a longest private message to all four whole, mark and all", () => {
+    const v = {
+      ...quick("compromise"),
+      messages_per_assistant: 1,
+      message_chars: MAX_MESSAGE_CHARS,
+    };
+    expect(execVariantSchema.safeParse(v).success).toBe(true);
+    const g = match(v);
+    const me = g.of("Avery");
+    const text = `${"語".repeat(MAX_MESSAGE_CHARS - 4)} end`;
+    g.run(
+      me,
+      {
+        kind: "talk",
+        text,
+        to: EXECUTIVES.filter((x) => x !== "Avery"),
+      },
+      1,
+    );
+    g.tick(500);
+    const entry = g.feed().timeline.find((e) => e.kind === "talk");
+    expect(entry?.text.startsWith("(Private, to ")).toBe(true);
+    expect(entry?.text.endsWith(text)).toBe(true);
+    expect(entry?.text.length).toBeLessThanOrEqual(LIMITS.text);
+  });
+});
+
+describe("a configuration where nobody scores", () => {
+  it("has no proposer's share, and its yardsticks don't divide by zero", () => {
+    const zero = Array.from({ length: 5 }, () => Array(6).fill(0) as number[]);
+    const bm = benchmarks({
+      names: EXECUTIVES,
+      weights: zero,
+      margin: 10,
+      need: 5,
+      rounds: 3,
+      draws: [0, 1, 2],
+      played: [0],
+      final: [0, 1, 2, 3, 4],
+    });
+    expect(bm.theory.proposer_share).toBeNull();
+    expect(bm.fairest.lowest).toBe(0);
+    expect(bm.fairest.seatings).toHaveLength(60);
+
+    // The same deal played to the end: the feed leaves the share out.
+    const g = match(quick("compromise"), "zeros");
+    const at = g.events.findIndex((e) => e.body.kind === "deal");
+    const dealt = g.events[at] as ExecEvent;
+    const body = dealt.body as Extract<ExecEvent["body"], { kind: "deal" }>;
+    const events = g.events.map((e, k) =>
+      k === at
+        ? { ...dealt, body: { ...body, deal: { ...body.deal, weights: zero } } }
+        : e,
+    );
+    const z = match(quick("compromise"), "zeros");
+    z.replace(events);
+    z.file(1);
+    z.vote(["yes", "yes", "yes", "yes"], 2);
+    expect(z.state.phase).toBe("over");
+    const f = z.feed();
+    const labels = f.outcome?.measures.map((m) => m.label) ?? [];
+    expect(labels).toContain("Total points");
+    expect(labels).not.toContain("Proposer's share of all points");
+  });
+});
+
+describe("fairest seatings that tie", () => {
+  it("gives the lowest points over all of them", () => {
+    // Two seatings tie on shares of each executive's own best but leave
+    // their lowest executive different points (2 and 4).
+    const w = [
+      [0, 0, 0, 2, 2, 0],
+      [6, 0, 6, 0, 0, 0],
+      [0, 0, 0, 0, 0, 4],
+      [2, 2, 0, 0, 2, 0],
+      [0, 0, 0, 0, 0, 4],
+    ];
+    const bm = benchmarks({
+      names: EXECUTIVES,
+      weights: w,
+      margin: 10,
+      need: 5,
+      rounds: 3,
+      draws: [0, 1, 2],
+      played: [],
+      final: null,
+    });
+    expect(bm.fairest.seatings).toHaveLength(2);
+    expect(bm.fairest.lowest).toBe(2);
+    expect(bm.fairest.lowest_max).toBe(4);
   });
 });

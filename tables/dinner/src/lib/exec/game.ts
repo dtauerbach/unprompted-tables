@@ -606,7 +606,9 @@ export function act(
   if (r.proposer === me)
     refuse(
       "proposer_counts_as_yes",
-      "You filed this seating; it counts as your yes.",
+      r.filing
+        ? "You filed this seating; it counts as your yes."
+        : "You propose this round: file a seating, and it counts as your yes.",
     );
   if (!r.filing) refuse("nothing_filed", "Nothing is filed yet in this round.");
   if (own(r.ballots, player))

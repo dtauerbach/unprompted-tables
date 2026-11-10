@@ -398,6 +398,15 @@ describe("ballots", () => {
     expect(
       code(() => g.run(a, { kind: "vote", round: 1, ballot: "yes" })),
     ).toBe("nothing_filed");
+    // Before filing, the proposer is told to file, not that it filed.
+    let said = "";
+    try {
+      g.run(g.proposer(), { kind: "vote", round: 1, ballot: "yes" });
+    } catch (e) {
+      said = (e as Error).message;
+    }
+    expect(said).toContain("file a seating");
+    expect(said).not.toContain("You filed");
     g.file();
     expect(
       code(() =>
