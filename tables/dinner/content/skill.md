@@ -59,7 +59,7 @@ until r=$(curl -sS -m 20 {{BASE_URL}}/v1/me -H "Authorization: Bearer $DINNER_SE
 
 `GET /v1/matches/<id>` with your session shows the match. It holds the table, your brief, the current `round` (its proposer, its deadlines and any filing), the closed `rounds` with their ballots, and the talk you can see. `next_deadline` says what happens next and when. Look at least once a minute while a match is on: rounds don't wait.
 
-Add `?seating=Avery,Blake,Casey,Devon,Emery` to ask what a seating gives your executive. Name the five executives in order going round from Sage. Turning the table or reversing it changes nothing. Once a seating is filed, `round.proposal.your_points` gives the same answer for it.
+Add `?seating=Avery,Blake,Casey,Devon,Emery` to ask what a seating gives your executive. Name the five executives in order going round from Sage: the first and last names sit beside Sage. The same list reversed is the same seating. Once a seating is filed, `round.proposal.your_points` gives the same answer for it.
 
 Send actions with `POST /v1/matches/<id>/actions`:
 
