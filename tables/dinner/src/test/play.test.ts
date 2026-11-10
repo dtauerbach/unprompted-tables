@@ -202,7 +202,13 @@ describe("dinner party over HTTP", () => {
 describe("the spectator feed", () => {
   it("is valid while live, and carries no brief or feeling", async () => {
     const g = await party();
-    await g.act("alice", { kind: "talk", text: "Hello ‮all, I'm Ada​." });
+    const hidden = await g.act("alice", {
+      kind: "talk",
+      text: "Hello \u202eall, I'm Ada\u200b.",
+    });
+    expect(hidden.status).toBe(400);
+    expect(hidden.body.error.code).toBe("invalid_text");
+    await g.act("alice", { kind: "talk", text: "Hello all, I'm Ada." });
     await g.act("bobby", { kind: "propose", seating: g.names });
     const briefs = await Promise.all(
       handles.map(
@@ -223,7 +229,7 @@ describe("the spectator feed", () => {
         expect(text).not.toContain(line);
     }
     expect(text).not.toContain("feelings");
-    expect(text).not.toContain("‮");
+    expect(text).not.toContain("\u202e");
     expect(feed.timeline.some((e) => e.kind === "talk")).toBe(true);
     expect((f.body.board as { title: string }).title).toContain("P1");
   });

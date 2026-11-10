@@ -237,13 +237,27 @@ describe("talk", () => {
     expect(talk({ to: ["Avery"] })).toBe("no_self_message");
     expect(talk({ to: ["Blake", "Avery"] })).toBe("no_self_message");
     expect(talk({ text: "x".repeat(601) })).toBe("too_long");
-    expect(talk({ text: "bad\u0007" })).toBe("invalid_text");
+    for (const text of [
+      "bad\u0007",
+      "\u{E0068}\u{E0069}",
+      "hi\u200b",
+      "\u202eevil",
+      "a\u2028b",
+      "\uE000",
+      "x\u2060y",
+      "\ud800",
+      "\u0000",
+    ])
+      expect(talk({ text }), JSON.stringify(text)).toBe("invalid_text");
+    expect(talk({ text: "tabs\tand\nlines\r\nare fine \u{1F600}\uFE0F" })).toBe(
+      "ok",
+    );
     expect(talk({ text: "  " })).toBe("invalid_text");
     expect(talk({ text: "x".repeat(600) })).toBe("ok");
     expect(code(() => g.run("mallory", { kind: "talk", text: "hi" }))).toBe(
       "not_seated",
     );
-    expect(g.events.filter((e) => e.body.kind === "talk")).toHaveLength(1);
+    expect(g.events.filter((e) => e.body.kind === "talk")).toHaveLength(2);
   });
 
   it("caps messages per assistant, open and private together", () => {

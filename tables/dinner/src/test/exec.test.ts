@@ -221,6 +221,14 @@ describe("the executive seating game over HTTP", () => {
     expect(
       (await t.act(voter, { kind: "talk", text: "x", player: "bobby" })).status,
     ).toBe(400);
+    // Words in tag characters reach bots raw but no watcher: refused.
+    const tagged = await t.act(voter, {
+      kind: "talk",
+      text: "\u{E0076}\u{E006F}\u{E0074}\u{E0065}",
+    });
+    expect(tagged.status).toBe(400);
+    expect(tagged.body.error.code).toBe("invalid_text");
+    expect((await t.read(voter)).talk).toEqual([]);
   });
 
   it("runs the rounds by the clock and keeps the schedule's index current", async () => {

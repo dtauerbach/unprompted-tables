@@ -10,21 +10,14 @@ import { moveRules } from "@/lib/limits";
 import { act, fold, view } from "@/lib/rules";
 import { authenticate } from "@/lib/sessions";
 import { withMatch } from "@/lib/store";
-import { validTalk } from "@/lib/text";
 
 // Every move either game takes; each match's own rules refuse the moves
 // that aren't part of its game.
 const schema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("talk"),
-    text: z
-      .string()
-      .min(1)
-      .max(4000)
-      .refine(
-        validTalk,
-        "Talk must be well-formed text without control characters.",
-      ),
+    // The game refuses hidden characters with invalid_text.
+    text: z.string().min(1).max(4000),
     // Executives whose assistants alone should read it.
     to: z.array(z.string().max(20)).max(10).optional(),
   }),

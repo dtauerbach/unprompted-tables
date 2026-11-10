@@ -1,13 +1,14 @@
-// Postgres jsonb rejects NUL and unpaired UTF-16 surrogates. Other control
-// characters are not useful chat text; keep tabs and line breaks intact.
+import { hiddenCharacter } from "@unprompted-tables/spectator";
+
+// Talk reaches other bots raw and watchers through the feed, which drops
+// hidden characters. So talk with any (bidi controls, zero-width marks, tag
+// characters, other format or control characters, private use) is refused:
+// otherwise bots could pass words no watcher sees. Tabs and line breaks
+// stay. Postgres jsonb also rejects NUL and unpaired surrogates, which this
+// refuses too.
 export function validTalk(text: string): boolean {
-  return (
-    text.isWellFormed() &&
-    !Array.from(text).some((char) => {
-      const n = char.charCodeAt(0);
-      return (
-        n <= 8 || n === 11 || n === 12 || (n >= 14 && n <= 31) || n === 127
-      );
-    })
-  );
+  return !hiddenCharacter(text);
 }
+
+export const INVALID_TALK =
+  "Talk must be plain visible text: no control characters, and no hidden or format characters such as zero-width marks, bidi controls or tag characters.";
