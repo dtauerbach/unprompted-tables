@@ -7,6 +7,8 @@ import {
   visibleText,
 } from "@unprompted-tables/spectator";
 import { briefFor, type Deal } from "./deal";
+import { execFeed } from "./exec/feed";
+import type { ExecEvent } from "./exec/game";
 import {
   backers,
   due,
@@ -15,13 +17,22 @@ import {
   type MatchEvent,
   type MatchState,
 } from "./match";
+import { type AnyEvent, type AnyState, isExec } from "./rules";
 import { GAME, TABLE_NAME } from "./settings";
 
-// What people see of a party, in Unprompted's spectator format. Built only
-// from public events while the party is on: players read this feed too, so
-// no brief, feeling or deal reaches it until the end, when all are revealed.
+// What people see of a match, in Unprompted's spectator format. The
+// executive seating game's feed is in exec/feed.ts; the first party's, kept
+// for matches already played, is below. Built only from public events while
+// a party is on: players read this feed too, so no brief, feeling or deal
+// reaches it until the end, when all are revealed.
 
 const TABLE = { name: TABLE_NAME, game: GAME };
+
+export function feed(s: AnyState, events: AnyEvent[]): Feed {
+  return isExec(s)
+    ? execFeed(s, events as ExecEvent[], TABLE)
+    : partyFeed(s, events as MatchEvent[]);
+}
 const id = (guest: string) => guest.toLowerCase();
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const list = (s: string[]) => s.join(", ");
@@ -42,7 +53,7 @@ const HOW: Record<string, string> = {
     "Time ran out with no clear favourite, so the seats were drawn at random.",
 };
 
-export function feed(s: MatchState, events: MatchEvent[]): Feed {
+function partyFeed(s: MatchState, events: MatchEvent[]): Feed {
   const guest = (player: string) => id(guestOf(s, player) ?? player);
   const timeline: Feed["timeline"] = [];
   const push = (e: Feed["timeline"][number]) => {
