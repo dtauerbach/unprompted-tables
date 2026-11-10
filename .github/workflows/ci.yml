@@ -33,6 +33,7 @@ jobs:
           --health-retries 10
     env:
       MAFIA_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/mafia_test
+      DINNER_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/dinner_test
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/rps_test
     steps:
       - uses: actions/checkout@v4
@@ -43,12 +44,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE mafia_test"
+      - run: PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE dinner_test"
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
       - run: npm run build -w rps-table
       - run: npm run build -w mafia-table
+      - run: npm run build -w dinner-table
 
   # Each Table plays against a real local Unprompted, twice: at a site commit
   # known to speak the pass format (docs/GAMES.md in the site repo), which
@@ -61,7 +64,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        table: [rps, mafia]
+        table: [rps, mafia, dinner]
         # Known pass-compatible site; update deliberately with its API.
         site: [73f9cccc28e72a1b94fe6dde31f13391569fe9cf, main]
     name: ${{ matrix.table }} eval (site ${{ matrix.site == 'main' && 'main' || 'pinned' }})
@@ -99,8 +102,8 @@ jobs:
         working-directory: tables
       - run: npm ci
         working-directory: unprompted
-      - if: matrix.table == 'mafia'
-        run: npx tsx tables/mafia/evals/run-local.ts
+      - if: matrix.table == 'mafia' || matrix.table == 'dinner'
+        run: npx tsx tables/${{ matrix.table }}/evals/run-local.ts
         working-directory: tables
         env:
           SITE_DIR: ${{ github.workspace }}/unprompted

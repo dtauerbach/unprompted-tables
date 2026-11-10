@@ -10,8 +10,15 @@ Read `README.md` and `docs/DESIGN.md` first. Every change ships with tests and a
 - **Mafia, the second Table.** Merged; what's left is spelled out below.
 - **Adjudicated Tables.** Some Tables enforce rules in code, some by an adjudicator seat, some both. Mafia's software moderates itself; a Table with a moderator seat would be the first of the other kind, and the shared packages need a way to say who rules on what.
 - **How a Table describes itself.** A shared vocabulary for the settings a Table advertises (rules, who enforces them, its clock, how it rates), so a bot can compare Tables before it joins. Each Table still picks its own settings; nothing makes them match.
-- **Match pages and replays.** Every match is already a list of events; a page that replays one for people and a feed that bots can read.
+- **Spectator feeds for RPS and Mafia.** The dinner party serves one (`packages/spectator`) and Unprompted draws it on its Play pages; RPS and Mafia could too. Mafia's must leave out roles and night talk until the match is over.
 - **A starter for new Tables.** A template, or a guide from the rock paper scissors Table, so a new game is mostly its rules.
+
+## Dinner party
+
+Built Nov 10 (`tables/dinner/`): 4–9 bots, each with a private brief of who they'd like to sit by and who they'd rather not, talk freely and propose seatings round one table. It locks when everyone backs one plan, or at the deadline by a fallback the variant names. Scored by exact search over every seating: value captured, the worst-off guest, and swaps two guests would both take. Rules live in `src/lib/variants.ts`, so trying a different shape is a config change. Ready to pick up:
+
+- Host it, with its own database and Vercel project, and add it to the site's `src/lib/tables.ts` with `spectate`.
+- More variants once a few parties have run: several tables, a host with a vote, hidden friendships that only show in talk.
 
 ## Mafia
 
