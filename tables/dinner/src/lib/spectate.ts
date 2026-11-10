@@ -193,8 +193,9 @@ function outcome(s: MatchState): NonNullable<Feed["outcome"]> {
 // Score, worst and best are all in the guest's own points, so a reader can
 // see where satisfaction comes from: Otto's 2 between -4 and 6 is 60%, not
 // 2 of 6. The fairest-seating column only shows when the seating differs
-// from the fairest one for someone; otherwise every row would read 0% and
-// the summary says it in words instead.
+// from the fairest one for someone; otherwise every row would read 0%. The
+// summary's sentence about the worst-off guest is separate and can show
+// beside the column.
 export function scoreTable(
   guests: readonly string[],
   d: Pick<Deal, "feel">,

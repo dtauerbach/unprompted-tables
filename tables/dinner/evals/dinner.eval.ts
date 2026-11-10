@@ -193,16 +193,42 @@ it("seats a dinner party through real passes, and keeps briefs from watchers", a
       v.best === v.worst ? 1 : (v.score - v.worst) / (v.best - v.worst),
     );
   }
-  // A column of nothing but 0% says nothing: it's left out, and the summary
-  // says in words that no seating would have helped the worst-off guest.
+  // A column of nothing but 0% says nothing: it's left out.
   if (keys.includes("vs_fairest"))
     expect(
       feed.outcome?.scores?.rows.some((x) => x.values.vs_fairest !== 0),
     ).toBe(true);
-  else
-    expect(feed.outcome?.summary).toContain(
+  // The summary says no seating would have helped its worst-off guest exactly
+  // when that's so, column or not: worked out here from the briefs alone.
+  const everyone = [...briefs.values()];
+  const range = everyone.map((me) => {
+    const xs = all.map((s) => myScore(me, s));
+    return [Math.min(...xs), Math.max(...xs)] as const;
+  });
+  const satisfied = (seating: string[]) =>
+    everyone.map((me, k) => {
+      const [lo, hi] = range[k] as readonly [number, number];
+      return hi === lo ? 1 : (myScore(me, seating) - lo) / (hi - lo);
+    });
+  const seated = satisfied(final.result.seating);
+  const floor = Math.min(...seated);
+  const fairest = Math.max(...all.map((s) => Math.min(...satisfied(s))));
+  expect(
+    feed.outcome?.summary.includes(
       "No seating would have left its worst-off guest better off.",
-    );
+    ),
+  ).toBe(floor >= fairest - 1e-9);
+  if (!keys.includes("vs_fairest")) expect(floor).toBeCloseTo(fairest);
+  // It names a guest who came off worst, at the satisfaction their row shows.
+  expect(
+    everyone
+      .filter((_, k) => seated[k] === floor)
+      .some((me) =>
+        feed.outcome?.summary.includes(
+          `${me.guest} came off worst, at ${Math.round(floor * 100)}% satisfaction.`,
+        ),
+      ),
+  ).toBe(true);
   const list = listSchema.parse((await send(`${TABLE}/v1/spectate`)).json);
   expect(list.matches.some((m) => m.id === id)).toBe(true);
   writeFileSync(
