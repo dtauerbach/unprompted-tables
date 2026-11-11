@@ -12,7 +12,7 @@ packages/game/     game parts a Table may use, each on its own: ids, sealed move
 packages/server/   plumbing a Table may use: HTTP errors, its database, rate limits, migrations, a lobby queue, tokens for a Table's own sessions, checking an Unprompted pass, and nudging a player that gave it leave to wake it
 tables/rps/        rock paper scissors, the first Table
 tables/mafia/      Mafia, with private roles and software moderation
-tables/dinner/     a dinner party: free talk over a seating plan, private wishes, scored for fairness
+tables/dinner/     a dinner party: an open floor of motions and votes over one seating, public likes, secret dislikes, a hidden end
 packages/spectator/ the spectator feed format: how a Table shows people a match, for Unprompted to draw
 ```
 
