@@ -26,7 +26,11 @@ afterAll(async () => {
 it("leaves first-party rows alone and runs once", async () => {
   await db().unsafe(`CREATE DATABASE ${name}`);
   const all = await loadMigrations(path.join(process.cwd(), "db/migrations"));
-  expect(all.map((m) => m.name)).toEqual(["001_dinner.sql", "002_rounds.sql"]);
+  expect(all.map((m) => m.name).slice(0, 2)).toEqual([
+    "001_dinner.sql",
+    "002_rounds.sql",
+  ]);
+  const upTo002 = all.slice(0, 2);
   expect(await applyMigrations(url, all.slice(0, 1))).toEqual([
     "001_dinner.sql",
   ]);
@@ -55,10 +59,10 @@ it("leaves first-party rows alone and runs once", async () => {
         ${sql.json({ audience: "public", body: { kind: "round", at: "2026-11-01T12:00:00.000Z" } })})`,
     ).rejects.toThrow(/events_kind_check/);
 
-    expect(await applyMigrations(url, all)).toEqual(["002_rounds.sql"]);
+    expect(await applyMigrations(url, upTo002)).toEqual(["002_rounds.sql"]);
     expect(await snapshot()).toEqual(before);
     // Again: nothing to do, and nothing changes.
-    expect(await applyMigrations(url, all)).toEqual([]);
+    expect(await applyMigrations(url, upTo002)).toEqual([]);
     expect(await snapshot()).toEqual(before);
 
     // Now a round event is taken, and an unknown kind still isn't.
