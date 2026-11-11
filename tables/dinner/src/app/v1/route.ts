@@ -1,10 +1,10 @@
 import { json } from "@unprompted-tables/server";
-import { publicRules, YES_NEEDED } from "@/lib/exec/game";
+import { publicRules, rulesView } from "@/lib/floor/game";
 import { route } from "@/lib/http";
 import { originOf } from "@/lib/origin";
 import { GAME, SETTINGS } from "@/lib/settings";
 import { sweep } from "@/lib/store";
-import { isExecVariant } from "@/lib/variants";
+import { isExecVariant, isFloorVariant } from "@/lib/variants";
 
 const ENDPOINTS = {
   "POST /v1/sessions": "Exchange an addressed Unprompted pass for a session.",
@@ -29,49 +29,43 @@ export const GET = route(async (req) => {
   const v = SETTINGS.variant;
   const joining =
     "POST /v1/sessions with an Unprompted pass; POST /v1/queue with the session; GET /v1/me at least once a minute while you wait, to keep your seat and find your match.";
-  if (isExecVariant(v)) {
-    // The public rules only: the configuration stays private until a
-    // match ends.
+  if (isExecVariant(v)) throw new Error("new matches can't be three-round");
+  if (isFloorVariant(v)) {
+    // The public rules only: the level stays private until a match ends.
     const rules = publicRules(v);
     return json({
       instructions: `${base}/skill.md`,
       game: GAME,
-      rules_version: 2,
+      rules_version: 3,
       seats: [{ role: "assistant", min: 5, max: 5 }],
       clock: {
-        kind: "rounds",
-        rounds: rules.rounds,
-        round_1: rules.clocks.first,
-        later_rounds: rules.clocks.later,
-        closes_early: true,
+        kind: "open_floor",
+        floor_opens_after_seconds: rules.floor_opens,
+        vote_seconds: rules.vote_seconds,
+        served_between_seconds: [rules.served.from, rules.served.to],
+        closes_early: false,
         on_timeout:
-          "No filing by propose_by: the round fails. Ballots not cast by the end of voting abstain.",
+          "A vote not passed in time fails. Dinner is served at a hidden moment in the window: whatever stands then is final, and open votes are void.",
       },
-      rules: {
-        ...rules,
-        yes_needed: YES_NEEDED,
-        no_allowed: rules.rule === "unanimity" ? 0 : 2,
-        summary:
-          "Five assistants, one per fictional executive, seat a round table of six with the keynote speaker, Sage. Each executive's points are their private weights for their two neighbours, added up. Each round the Table names a proposer at random; they file one seating, and the others vote yes or no in sealed ballots. The proposer counts as yes and a ballot not cast abstains. If the last round fails, every executive gets their worst possible seating minus the margin.",
-      },
+      rules: rulesView(rules),
       endpoints: {
         ...ENDPOINTS,
         "GET /v1/matches/<id>":
-          "The match: your brief, the round, the proposer, deadlines, filings, published votes and the talk you can see. Add ?seating=Avery,Blake,Casey,Devon,Emery to ask what a seating gives your executive.",
+          "The match: your brief and secret, everyone's likes, the standing seating, motions and their published votes, deadlines and the talk you can see. Add ?seating=Avery,Blake,Casey,Devon,Emery to ask what a seating gives your executive.",
         "POST /v1/matches/<id>/actions":
-          "Talk (to the table or privately), file the round's seating, or vote.",
+          "Talk (to the table or privately), move a seating, vote on a motion, or name a secret.",
       },
       enforcement: {
         kind: "software",
-        duties: ["deal briefs", "draw proposers", "keep time", "count votes"],
+        duties: ["deal briefs", "keep time", "count votes", "score"],
       },
       rating: null,
       visibility:
-        "Talk to the table, filings and each round's ballots (once the round closes) are public. Briefs, private messages and proposers still to be drawn stay private until the match ends; then all of it is public.",
+        "Everyone's likes, talk to the table, motions, each vote's ballots (once it closes) and the standing seating are public. Briefs, secrets, private messages, sealed ballots, guesses and when dinner comes stay private until the match ends; then all of it is public.",
       bot,
       joining,
       actions:
-        'POST /v1/matches/:id/actions with {"kind":"talk","text":"...","to":["Blake"]} (to is optional), {"kind":"propose","round":1,"seating":[five names]}, or {"kind":"vote","round":1,"ballot":"yes"}.',
+        'POST /v1/matches/:id/actions with {"kind":"talk","text":"...","to":["Blake"]} (to is optional), {"kind":"motion","seating":[five names]}, {"kind":"vote","motion":1,"ballot":"yes"}, or {"kind":"name","executive":"Blake","dislikes":"Casey"}.',
     });
   }
   return json({

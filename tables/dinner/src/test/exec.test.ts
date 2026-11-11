@@ -1,36 +1,41 @@
 import { db } from "@unprompted-tables/server";
 import { feedSchema, listSchema } from "@unprompted-tables/spectator";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
-// The executive seating game over HTTP, as a bot plays it. This file deals
-// its matches under the quick compromise, set before any module reads it.
-vi.hoisted(() => {
-  process.env.DINNER_VARIANT = "quick-compromise";
-});
+// The three-round executive game over HTTP, as a bot plays it. The Table
+// deals no new matches under it, but one dealt before the open floor came
+// must still play to its end and render: each test here puts one straight
+// into the database, under the quick compromise.
 
-import { GET as skill } from "@/app/skill.md/route";
 import { POST as action } from "@/app/v1/matches/[id]/actions/route";
 import { GET as getMatch } from "@/app/v1/matches/[id]/route";
 import { GET as me } from "@/app/v1/me/route";
-import { POST as queue } from "@/app/v1/queue/route";
-import { GET as describeTable } from "@/app/v1/route";
 import { GET as spectateOne } from "@/app/v1/spectate/[id]/route";
 import { GET as spectateList } from "@/app/v1/spectate/route";
-import { moveClock } from "@/lib/clock";
-import { EXECUTIVES } from "@/lib/exec/game";
+import { moveClock, now } from "@/lib/clock";
+import { EXECUTIVES, start as startExec } from "@/lib/exec/game";
+import { EXEC_VARIANTS } from "@/lib/exec/variants";
 import { start as startParty } from "@/lib/match";
-import { SETTINGS } from "@/lib/settings";
 import { sweep } from "@/lib/store";
 import { VARIANTS } from "@/lib/variants";
-import { call, countRows, resetDb, sessionFor } from "./helpers";
+import { call, countRows, insertMatch, resetDb, sessionFor } from "./helpers";
 
 beforeEach(resetDb);
 const handles = ["alice", "bobby", "carol", "david", "ellen"];
 
+const QUICK = EXEC_VARIANTS["quick-compromise"] as NonNullable<
+  (typeof EXEC_VARIANTS)["quick-compromise"]
+>;
+
 async function table() {
   const tokens = await Promise.all(handles.map((p) => sessionFor(p)));
-  for (const s of tokens) await call(queue, { session: s, method: "POST" });
+  await insertMatch(
+    "m_threeroundAA",
+    handles,
+    startExec(handles, QUICK, now(), "under-way"),
+  );
   const id = (await call(me, { session: tokens[0] })).body.match as string;
+  expect(id).toBe("m_threeroundAA");
   const seat = (handle: string) => tokens[handles.indexOf(handle)] as string;
   const read = async (handle?: string, query = "") =>
     (
@@ -56,36 +61,7 @@ async function table() {
   return { id, tokens, seat, read, act, of, proposer };
 }
 
-describe("the executive seating game over HTTP", () => {
-  it("seats exactly five, whatever the environment says", async () => {
-    expect(process.env.DINNER_MAX_PLAYERS).toBe("6");
-    expect(SETTINGS.lobby.min_players).toBe(5);
-    expect(SETTINGS.lobby.max_players).toBe(5);
-    const tokens = await Promise.all(
-      [...handles, "frank"].map((p) => sessionFor(p)),
-    );
-    for (const s of tokens) await call(queue, { session: s, method: "POST" });
-    const rows = await db()<
-      { players: string[] }[]
-    >`SELECT players FROM matches`;
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.players).toHaveLength(5);
-    expect((await call(me, { session: tokens[5] })).body.status).toBe(
-      "waiting",
-    );
-  });
-
-  it("describes the public rules and not the configuration", async () => {
-    const d = await call(describeTable);
-    expect(d.body.rules_version).toBe(2);
-    expect(d.body.seats).toEqual([{ role: "assistant", min: 5, max: 5 }]);
-    expect(d.body.rules.rule).toBe("unanimity");
-    expect(JSON.stringify(d.body)).not.toContain("compromise");
-    const s = await call(skill);
-    expect(s.text).toContain("@dinner-table");
-    expect(s.text).toContain('"kind": "vote"');
-  });
-
+describe("a three-round match under way when the open floor came", () => {
   it("plays a round to a deal and reveals everything at the end", async () => {
     const t = await table();
     const p = await t.proposer();

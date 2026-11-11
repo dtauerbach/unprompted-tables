@@ -3,33 +3,33 @@ import { z } from "zod";
 import {
   type AnyVariant,
   GUESTS,
-  isExecVariant,
+  isFloorVariant,
   parseVariant,
   variantNamed,
 } from "./variants";
 
 const seats = z.number().int().min(GUESTS.min).max(GUESTS.max);
 
-// The variant this Table deals new matches under: the executive seating
-// game's standoff unless DINNER_VARIANT names another. A deprecated party
-// variant may still be named; DINNER_TALK_SECONDS overrides its talk time
-// and nothing else. Read at startup; each match keeps a copy.
+// The variant this Table deals new matches under: the open floor's feud
+// unless DINNER_VARIANT names another. A deprecated party variant may still
+// be named; DINNER_TALK_SECONDS overrides its talk time and nothing else.
+// Read at startup; each match keeps a copy.
 function variant(): AnyVariant {
   const base = variantNamed(process.env.DINNER_VARIANT || undefined);
   const talk = process.env.DINNER_TALK_SECONDS;
-  if (isExecVariant(base) || talk === undefined) return parseVariant(base);
+  if (isFloorVariant(base) || talk === undefined) return parseVariant(base);
   return parseVariant({ ...base, talk_seconds: Number(talk) });
 }
 
 const chosen = variant();
 
-// The executive seating game seats exactly five, whatever the environment
-// says; a party takes DINNER_MIN_PLAYERS to DINNER_MAX_PLAYERS.
+// The open floor seats exactly five, whatever the environment says; a party
+// takes DINNER_MIN_PLAYERS to DINNER_MAX_PLAYERS.
 const lobby = lobbyRules({
-  min_players: isExecVariant(chosen)
+  min_players: isFloorVariant(chosen)
     ? 5
     : seats.parse(Number(process.env.DINNER_MIN_PLAYERS ?? 4)),
-  max_players: isExecVariant(chosen)
+  max_players: isFloorVariant(chosen)
     ? 5
     : seats.parse(Number(process.env.DINNER_MAX_PLAYERS ?? 8)),
   fill_seconds: z

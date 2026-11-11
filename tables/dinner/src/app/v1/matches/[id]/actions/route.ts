@@ -28,9 +28,20 @@ const schema = z.discriminatedUnion("kind", [
     seating: z.array(z.string().max(20)).min(1).max(20),
   }),
   z.strictObject({
+    kind: z.literal("motion"),
+    seating: z.array(z.string().max(20)).min(1).max(20),
+  }),
+  // The open floor votes on a motion; the three-round game, on a round.
+  z.strictObject({
     kind: z.literal("vote"),
-    round: z.number().int().min(1).max(100),
+    motion: z.number().int().min(1).max(1000).optional(),
+    round: z.number().int().min(1).max(100).optional(),
     ballot: z.enum(["yes", "no"]),
+  }),
+  z.strictObject({
+    kind: z.literal("name"),
+    executive: z.string().max(20),
+    dislikes: z.string().max(20),
   }),
   z.strictObject({
     kind: z.literal("back"),

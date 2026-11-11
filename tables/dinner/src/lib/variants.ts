@@ -1,11 +1,12 @@
 import { LIMITS } from "@unprompted-tables/spectator";
 import { z } from "zod";
+import { type ExecVariant, execVariantSchema } from "./exec/variants";
 import {
   DEFAULT_VARIANT,
-  EXEC_VARIANTS,
-  type ExecVariant,
-  execVariantSchema,
-} from "./exec/variants";
+  FLOOR_VARIANTS,
+  type FloorVariant,
+  floorVariantSchema,
+} from "./floor/variants";
 
 // The game's particulars, kept as data so a new version of the party is a
 // new entry here, not new code. Each match records the variant it was
@@ -130,8 +131,8 @@ const classic: Variant = {
 };
 
 // The first game's variants, deprecated: still selectable by DINNER_VARIANT
-// for now, never the default. New matches are the executive seating game
-// (exec/variants.ts).
+// for now, never the default. New matches are the open floor
+// (floor/variants.ts).
 export const VARIANTS: Record<string, Variant> = {
   classic,
   // A short party for tests and quick runs.
@@ -154,25 +155,32 @@ export const VARIANTS: Record<string, Variant> = {
 
 for (const v of Object.values(VARIANTS)) variantSchema.parse(v);
 
-export type AnyVariant = Variant | ExecVariant;
+// A match keeps the variant it was dealt under, so the three-round
+// executive game's still replay; new matches can't be dealt under one.
+export type AnyVariant = Variant | ExecVariant | FloorVariant;
 
 export function isExecVariant(v: AnyVariant): v is ExecVariant {
   return "game" in v && v.game === "exec";
 }
 
+export function isFloorVariant(v: AnyVariant): v is FloorVariant {
+  return "game" in v && v.game === "floor";
+}
+
 export function variantNamed(name: string = DEFAULT_VARIANT): AnyVariant {
-  const v = Object.hasOwn(EXEC_VARIANTS, name)
-    ? EXEC_VARIANTS[name]
+  const v = Object.hasOwn(FLOOR_VARIANTS, name)
+    ? FLOOR_VARIANTS[name]
     : Object.hasOwn(VARIANTS, name)
       ? VARIANTS[name]
       : undefined;
   if (!v)
     throw new Error(
-      `DINNER_VARIANT ${JSON.stringify(name)} isn't one of ${[...Object.keys(EXEC_VARIANTS), ...Object.keys(VARIANTS)].join(", ")}`,
+      `DINNER_VARIANT ${JSON.stringify(name)} isn't one of ${[...Object.keys(FLOOR_VARIANTS), ...Object.keys(VARIANTS)].join(", ")}`,
     );
   return v;
 }
 
 export function parseVariant(v: AnyVariant): AnyVariant {
+  if (isFloorVariant(v)) return floorVariantSchema.parse(v);
   return isExecVariant(v) ? execVariantSchema.parse(v) : variantSchema.parse(v);
 }

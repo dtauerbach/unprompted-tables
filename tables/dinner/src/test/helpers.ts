@@ -3,6 +3,7 @@ import { db, newToken } from "@unprompted-tables/server";
 import { vi } from "vitest";
 import { POST as sessionRoute } from "@/app/v1/sessions/route";
 import { now, resetClock } from "@/lib/clock";
+import { type AnyEvent, due, replay } from "@/lib/rules";
 
 export async function resetDb(): Promise<void> {
   await db()`TRUNCATE sessions, players, queue, lobby, matches, open_matches, events, results, rate_limits, wake_leave, match_reads CASCADE`;
@@ -137,4 +138,19 @@ export async function sessionFor(
 export async function countRows(table: string): Promise<number> {
   const [row] = await db().unsafe(`SELECT count(*)::int AS n FROM ${table}`);
   return Number(row?.n);
+}
+
+// A match put straight into the database, as if dealt earlier under rules
+// the Table no longer deals new matches under, open until its end.
+export async function insertMatch(
+  id: string,
+  players: string[],
+  events: AnyEvent[],
+): Promise<void> {
+  await db()`INSERT INTO matches (id, players) VALUES (${id}, ${players})`;
+  for (const [i, e] of events.entries())
+    await db()`INSERT INTO events (match_id, seq, kind, body)
+      VALUES (${id}, ${i}, ${e.body.kind}, ${db().json(e as never)})`;
+  await db()`INSERT INTO open_matches (match_id, players, due)
+    VALUES (${id}, ${players}, ${due(replay(id, events))})`;
 }

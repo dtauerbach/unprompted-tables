@@ -9,6 +9,8 @@ import {
 import { briefFor, type Deal } from "./deal";
 import { execFeed } from "./exec/feed";
 import type { ExecEvent } from "./exec/game";
+import { floorFeed } from "./floor/feed";
+import type { FloorEvent } from "./floor/game";
 import {
   backers,
   due,
@@ -17,12 +19,12 @@ import {
   type MatchEvent,
   type MatchState,
 } from "./match";
-import { type AnyEvent, type AnyState, isExec } from "./rules";
+import { type AnyEvent, type AnyState, isExec, isFloor } from "./rules";
 import { bounds, scores } from "./score";
 import { GAME, TABLE_NAME } from "./settings";
 
-// What people see of a match, in Unprompted's spectator format. The
-// executive seating game's feed is in exec/feed.ts; the first party's, kept
+// What people see of a match, in Unprompted's spectator format. The open
+// floor's feed is in floor/feed.ts, the three-round game's in exec/feed.ts; the first party's, kept
 // for matches already played, is below. Built only from public events while
 // a party is on: players read this feed too, so no brief, feeling or deal
 // reaches it until the end, when all are revealed.
@@ -30,6 +32,7 @@ import { GAME, TABLE_NAME } from "./settings";
 const TABLE = { name: TABLE_NAME, game: GAME };
 
 export function feed(s: AnyState, events: AnyEvent[]): Feed {
+  if (isFloor(s)) return floorFeed(s, events as FloorEvent[], TABLE);
   return isExec(s)
     ? execFeed(s, events as ExecEvent[], TABLE)
     : partyFeed(s, events as MatchEvent[]);
