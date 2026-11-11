@@ -99,6 +99,7 @@ export async function withMatch<T>(
     const at = new Date(
       Math.max(arrived.getTime(), Date.parse(stored.at(-1)?.body.at ?? "")),
     );
+    // Known race: a ballot begun just before dinner can lose this lock to the read that serves it, and gets match_over.
     const late = advance(replay(id, stored), at);
     const state = fold(replay(id, stored), late);
     const out = await fn(state, [...stored, ...late], tx, at);
