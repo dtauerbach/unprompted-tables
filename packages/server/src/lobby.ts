@@ -152,7 +152,9 @@ export type LobbyTable = {
   joinRules: (player: string) => Rule[];
   openMatchOf: (tx: Tx, player: string) => Promise<string | null>;
   settleMatch: (match: string) => Promise<void>;
-  startMatch: (tx: Tx, players: string[]) => Promise<string>;
+  // by: the player whose request started it, who learns of the match in
+  // its own answer.
+  startMatch: (tx: Tx, players: string[], by: string) => Promise<string>;
 };
 
 // The queue endpoints of a Table that seats players through the lobby. A
@@ -173,13 +175,14 @@ export function lobbyQueue(t: LobbyTable) {
   async function change(
     tx: Tx,
     at: Date,
+    by: string,
     what: () => Promise<unknown>,
   ): Promise<void> {
     await syncTimer(tx, t.rules, at);
     await what();
     await syncTimer(tx, t.rules, at);
     const players = await takeDue(tx, t.rules, at);
-    if (players) await t.startMatch(tx, players);
+    if (players) await t.startMatch(tx, players, by);
   }
 
   async function standingIn(tx: Tx, player: string, at: Date) {
@@ -205,7 +208,7 @@ export function lobbyQueue(t: LobbyTable) {
         const current = await t.openMatchOf(tx, player);
         if (current) return { status: "playing", match: current };
         await consume(tx, t.joinRules(player));
-        await change(tx, at, () => holdSeat(tx, t.rules, player, at));
+        await change(tx, at, player, () => holdSeat(tx, t.rules, player, at));
         return standingIn(tx, player, at);
       });
     },
@@ -219,6 +222,7 @@ export function lobbyQueue(t: LobbyTable) {
         await change(
           tx,
           at,
+          player,
           () => tx`DELETE FROM queue WHERE player = ${player}`,
         );
       });
@@ -243,7 +247,9 @@ export function lobbyQueue(t: LobbyTable) {
             (!fresh || dueToStart(t.rules, seats, at, await timer(tx)))
           ) {
             await lockLobby(tx, t.lock);
-            await change(tx, at, () => checkIn(tx, t.rules, player, at));
+            await change(tx, at, player, () =>
+              checkIn(tx, t.rules, player, at),
+            );
           }
         }
         return standingIn(tx, player, at);

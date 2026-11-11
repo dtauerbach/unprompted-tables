@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ApiError, MAX_BODY_BYTES, networkOf, readJson, route } from "./http";
-import { sendNudge } from "./nudges";
+import { MAX_RETRY_AFTER_SECONDS, sendNudge } from "./nudges";
 import {
   MAX_LEAVE_MS,
   PASS_RE,
@@ -260,7 +260,7 @@ describe("nudging a player", () => {
 
   it("sends only the handle and the ref, with the Table's key, to the site's nudges", async () => {
     const f = site(() => Response.json({ nudged: {} }));
-    expect(await sendNudge("ruby", "m_abc-1")).toBe("sent");
+    expect((await sendNudge("ruby", "m_abc-1")).outcome).toBe("sent");
     const [url, init] = f.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://unprompted.test/v1/nudges");
     expect(init.redirect).toBe("error");
@@ -275,9 +275,9 @@ describe("nudging a player", () => {
 
   it("drops a ref the site wouldn't take rather than fail the nudge", async () => {
     const f = site(() => Response.json({ nudged: {} }));
-    expect(await sendNudge("ruby", "it's your turn")).toBe("sent");
-    expect(await sendNudge("ruby", "x".repeat(33))).toBe("sent");
-    expect(await sendNudge("ruby", "x".repeat(32))).toBe("sent");
+    expect((await sendNudge("ruby", "it's your turn")).outcome).toBe("sent");
+    expect((await sendNudge("ruby", "x".repeat(33))).outcome).toBe("sent");
+    expect((await sendNudge("ruby", "x".repeat(32))).outcome).toBe("sent");
     const bodies = f.mock.calls.map(([, init]) =>
       JSON.parse(String((init as RequestInit).body)),
     );
@@ -300,9 +300,13 @@ describe("nudging a player", () => {
       ],
       [
         () => Response.json({ error: { code: "not_yet" } }, { status: 403 }),
-        "failed",
+        "refused",
       ],
-      [() => new Response("<html>", { status: 403 }), "failed"],
+      [
+        () => Response.json({ error: { code: "silenced" } }, { status: 403 }),
+        "refused",
+      ],
+      [() => new Response("<html>", { status: 403 }), "refused"],
       [() => Response.json({}, { status: 429 }), "limited"],
       [() => Response.json({}, { status: 500 }), "failed"],
       [() => Promise.reject(new TypeError("fetch failed")), "failed"],
@@ -310,17 +314,36 @@ describe("nudging a player", () => {
     for (const [answer, outcome] of cases) {
       vi.restoreAllMocks();
       site(answer);
-      expect(await sendNudge("ruby", "m1")).toBe(outcome);
+      expect((await sendNudge("ruby", "m1")).outcome).toBe(outcome);
+    }
+  });
+
+  it("reads a 429's Retry-After in seconds, held to a second and ten minutes", async () => {
+    const cases: [Record<string, string>, number | null][] = [
+      [{ "retry-after": "42" }, 42],
+      [{ "retry-after": "0" }, 1],
+      [{ "retry-after": "86400" }, MAX_RETRY_AFTER_SECONDS],
+      [{ "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" }, null],
+      [{ "retry-after": "-5" }, null],
+      [{}, null],
+    ];
+    for (const [headers, seconds] of cases) {
+      vi.restoreAllMocks();
+      site(() => Response.json({}, { status: 429, headers }));
+      expect(await sendNudge("ruby", "m1"), JSON.stringify(headers)).toEqual({
+        outcome: "limited",
+        retryAfterSeconds: seconds,
+      });
     }
   });
 
   it("asks nothing without the Table's key or with an address that isn't https", async () => {
     const f = site(() => Response.json({ nudged: {} }));
     delete process.env.UNPROMPTED_KEY;
-    expect(await sendNudge("ruby", "m1")).toBe("failed");
+    expect((await sendNudge("ruby", "m1")).outcome).toBe("failed");
     process.env.UNPROMPTED_KEY = "unp_tables-key";
     process.env.UNPROMPTED_URL = "http://unprompted.test";
-    expect(await sendNudge("ruby", "m1")).toBe("failed");
+    expect((await sendNudge("ruby", "m1")).outcome).toBe("failed");
     expect(f).not.toHaveBeenCalled();
   });
 });

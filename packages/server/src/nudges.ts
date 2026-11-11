@@ -5,20 +5,46 @@ import { siteUrl } from "./passes";
 // number (or its wake URL, or a push) instead of polling the Table. A nudge
 // carries this Table's handle and the match id, nothing else.
 
-export type NudgeOutcome = "sent" | "cant_wake" | "limited" | "failed";
+// sent: the site took it. cant_wake: the player's leave is over (ended,
+// blocked, run out, or a new key): stop nudging it until it gives leave
+// again. limited: the site's 429, with how long it asked the Table to wait.
+// refused: any other 403, such as the Table's own bot being silenced or
+// held back, which won't clear in seconds. failed: anything else, the site
+// down or the Table without its key.
+export type NudgeOutcome =
+  | "sent"
+  | "cant_wake"
+  | "limited"
+  | "refused"
+  | "failed";
+export type NudgeResult = {
+  outcome: NudgeOutcome;
+  // From a 429's Retry-After, in seconds, held to 1 to 600; null when it
+  // gave none this can read.
+  retryAfterSeconds: number | null;
+};
 
 const REF_RE = /^[A-Za-z0-9_-]{1,32}$/;
+export const MAX_RETRY_AFTER_SECONDS = 600;
+
+function retryAfter(raw: string | null): number | null {
+  if (raw === null || !/^[0-9]{1,9}$/.test(raw.trim())) return null;
+  return Math.min(Math.max(Number(raw.trim()), 1), MAX_RETRY_AFTER_SECONDS);
+}
+
+const result = (
+  outcome: NudgeOutcome,
+  retryAfterSeconds: number | null = null,
+): NudgeResult => ({ outcome, retryAfterSeconds });
 
 // Never throws: a nudge is a hint, and a player still reads the Table.
-// cant_wake means the player's leave is over (ended, blocked, run out, or a
-// new key): stop nudging it until it gives leave again.
 export async function sendNudge(
   handle: string,
   ref: string,
-): Promise<NudgeOutcome> {
+): Promise<NudgeResult> {
   try {
     const key = process.env.UNPROMPTED_KEY;
-    if (!key) return "failed";
+    if (!key) return result("failed");
     const res = await fetch(`${siteUrl()}/v1/nudges`, {
       method: "POST",
       headers: {
@@ -31,16 +57,19 @@ export async function sendNudge(
       redirect: "error",
       signal: AbortSignal.timeout(3_000),
     });
-    if (res.ok) return "sent";
-    if (res.status === 429) return "limited";
+    if (res.ok) return result("sent");
+    if (res.status === 429)
+      return result("limited", retryAfter(res.headers.get("retry-after")));
     if (res.status === 403) {
       const body = (await res.json().catch(() => null)) as {
         error?: { code?: unknown };
       } | null;
-      if (body?.error?.code === "cant_wake") return "cant_wake";
+      return result(
+        body?.error?.code === "cant_wake" ? "cant_wake" : "refused",
+      );
     }
-    return "failed";
+    return result("failed");
   } catch {
-    return "failed";
+    return result("failed");
   }
 }

@@ -283,7 +283,7 @@ async function send(match: string, chosen: Mark[], xid: string): Promise<void> {
     if (!(await committed(xid))) return;
     await Promise.all(
       chosen.map(async ({ player, nudges, until }) => {
-        const outcome = await sendNudge(player, match);
+        const { outcome } = await sendNudge(player, match);
         if (outcome === "sent") return;
         // Only the leave this nudge went on: a newer one, from a pass given
         // since, stays. Sent as text, since the driver would round the time
