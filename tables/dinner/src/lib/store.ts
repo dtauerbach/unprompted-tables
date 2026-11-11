@@ -53,13 +53,7 @@ async function append(
       INSERT INTO events (match_id, seq, kind, body)
       VALUES (${id}, ${from + i}, ${e.body.kind}, ${tx.json(e)})`;
   // Wake the players these events need who let this Table wake them.
-  await choose(
-    tx,
-    id,
-    wakesFor(state.players, events, isExec(state)),
-    actor,
-    new Date(events.at(-1)?.body.at ?? Date.now()),
-  );
+  await choose(tx, id, wakesFor(state.players, events, isExec(state)), actor);
   const next = due(state);
   // Liveness is a rule decision, not the presence of a scheduled deadline.
   if (state.phase !== "over")
@@ -174,11 +168,16 @@ export async function openMatchOf(
   return row?.match_id ?? null;
 }
 
-export async function startMatch(tx: Tx, players: string[]): Promise<string> {
+// by: the player whose request started it, who learns of it in the answer.
+export async function startMatch(
+  tx: Tx,
+  players: string[],
+  by: string | null = null,
+): Promise<string> {
   const id = newMatchId();
   const events = start(players, SETTINGS.variant, await matchStartTime(tx));
   await tx`INSERT INTO matches (id, players) VALUES (${id}, ${players})`;
-  await append(tx, id, 0, events, replay(id, events), null);
+  await append(tx, id, 0, events, replay(id, events), by);
   return id;
 }
 

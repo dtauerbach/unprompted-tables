@@ -12,7 +12,7 @@ import { POST as action } from "@/app/v1/matches/[id]/actions/route";
 import { GET as getMatch } from "@/app/v1/matches/[id]/route";
 import { GET as me } from "@/app/v1/me/route";
 import { POST as queue } from "@/app/v1/queue/route";
-import { moveClock, now } from "@/lib/clock";
+import { moveClock } from "@/lib/clock";
 import { EXECUTIVES, start as startExec } from "@/lib/exec/game";
 import { EXEC_VARIANTS } from "@/lib/exec/variants";
 import { start as startParty } from "@/lib/match";
@@ -20,13 +20,14 @@ import type { AnyEvent } from "@/lib/rules";
 import { sweep } from "@/lib/store";
 import { VARIANTS } from "@/lib/variants";
 import {
-  BACKOFF_MS,
   choose,
-  FAILED_PAUSE_MS,
   NUDGE_BUDGET,
-  NUDGE_LOCK,
+  PAUSES,
   resetBackoff,
+  STALE_MARK_MS,
   setWakeRunner,
+  WAKE_TIMING,
+  type Wakes,
   wakesFor,
 } from "@/lib/wake";
 import { call, fakeSite, holderOf, join, resetDb, sessionFor } from "./helpers";
@@ -39,6 +40,9 @@ import { call, fakeSite, holderOf, join, resetDb, sessionFor } from "./helpers";
 // one player can spend.
 
 const handles = ["alice", "bobby", "carol", "david", "ellen"];
+// The last to join starts the match, and learns of it from its own answer.
+const joiner = "ellen";
+const timing = { ...WAKE_TIMING };
 
 let jobs: (() => Promise<void>)[] = [];
 let restoreRunner: () => void = () => {};
@@ -66,6 +70,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   Object.assign(NUDGE_BUDGET, budget);
+  Object.assign(WAKE_TIMING, timing);
   delete process.env.TABLE_READ_ONLY;
   restoreRunner();
   vi.restoreAllMocks();
@@ -89,12 +94,17 @@ async function letWake(who: string[], until = "1 day") {
 
 const all = (...but: string[]) => handles.filter((h) => !but.includes(h));
 
-async function match(wake: string[] = handles) {
-  const tokens = await Promise.all(handles.map((p) => sessionFor(p)));
+async function match(
+  wake: string[] = handles,
+  players = handles,
+  beforeStart: () => Promise<unknown> = async () => {},
+) {
+  const tokens = await Promise.all(players.map((p) => sessionFor(p)));
   await letWake(wake);
+  await beforeStart();
   for (const s of tokens) await call(queue, { session: s, method: "POST" });
   const id = (await call(me, { session: tokens[0] })).body.match as string;
-  const seat = (h: string) => tokens[handles.indexOf(h)] as string;
+  const seat = (h: string) => tokens[players.indexOf(h)] as string;
   // A watcher's look: no session, so it marks nobody as having read.
   const look = async () => (await call(getMatch, { params: { id } })).body;
   const first = await look();
@@ -110,7 +120,7 @@ async function match(wake: string[] = handles) {
   const read = (h: string) =>
     call(getMatch, { params: { id }, session: seat(h) });
   const readAll = async (...but: string[]) => {
-    for (const h of all(...but)) await read(h);
+    for (const h of players.filter((p) => !but.includes(p))) await read(h);
   };
   const act = (h: string, body: unknown) =>
     call(action, { params: { id }, session: seat(h), body });
@@ -128,6 +138,22 @@ async function match(wake: string[] = handles) {
     act(h, { kind: "vote", round, ballot });
   return { id, seat, look, read, readAll, act, talk, proposer, file, vote };
 }
+
+// Chooses whom to wake in a write of the test's own, which commits.
+const chooseNow = (id: string, wakes: Wakes, actor: string | null = null) =>
+  db().begin((sql) => choose(sql, id, wakes, actor));
+const talkTo = (by: string, to: string[]): Wakes => ({
+  game: [],
+  talk: new Map([[by, to]]),
+});
+const errorLines = () => {
+  const lines: string[] = [];
+  vi.spyOn(console, "error").mockImplementation((line: unknown) => {
+    lines.push(String(line));
+  });
+  return () =>
+    lines.map((l) => (JSON.parse(l) as { operation?: string }).operation);
+};
 
 describe("who an event wakes", () => {
   const at = new Date("2026-11-10T12:00:00.000Z");
@@ -221,6 +247,11 @@ describe("waking players through a match", () => {
     expect(g.id).toMatch(/^m_/);
     // Once each: the first round's opening comes with the start.
     expect(await flush()).toEqual(["alice", "bobby", "carol"]);
+  });
+
+  it("never wakes the player whose join started the match", async () => {
+    await match();
+    expect(await flush()).toEqual(all(joiner));
   });
 
   it("sends only the handle and the match id", async () => {
@@ -406,7 +437,7 @@ describe("when nudges go wrong", () => {
       });
       const write = db()
         .begin(async (sql) => {
-          await choose(sql, g.id, wakes, "alice", now());
+          await choose(sql, g.id, wakes, "alice");
           await gate;
           if (outcome === "rollback") throw new Error("rolled back");
         })
@@ -437,7 +468,7 @@ describe("when nudges go wrong", () => {
     // spend the players' budget on tries.
     await g.talk("alice", "two", ["bobby", "carol"]);
     expect(await flush()).toEqual([]);
-    moveClock(FAILED_PAUSE_MS + 1000);
+    moveClock(PAUSES.failedMs + 1000);
     // Nobody was woken, so the next talk wakes them.
     await g.talk("alice", "three", ["bobby", "carol"]);
     expect(await flush()).toEqual(["bobby", "carol"]);
@@ -456,7 +487,7 @@ describe("when nudges go wrong", () => {
     siteAnswer = () => Response.json({ nudged: {} });
     await g.talk("david", "two", ["alice", "ellen"]);
     expect(await flush()).toEqual([]);
-    moveClock(BACKOFF_MS + 1000);
+    moveClock(PAUSES.limitedMs + 1000);
     // A minute on, filing time has run out too, so ellen's talk closes the
     // round and wakes everyone but her and carol, who was woken and hasn't
     // read. bobby, never woken, is woken now.
@@ -479,10 +510,48 @@ describe("when nudges go wrong", () => {
     await g.talk("alice", "one", ["bobby", "carol"]);
     await flush();
     siteAnswer = () => Response.json({ nudged: {} });
-    moveClock(FAILED_PAUSE_MS + 1000);
+    moveClock(PAUSES.failedMs + 1000);
     await g.readAll();
     await g.talk("alice", "six seconds later", ["bobby", "carol"]);
     expect(await flush()).toEqual([]);
+  });
+
+  it("waits as long as a 429's Retry-After asks", async () => {
+    const g = await match();
+    await flush();
+    await g.readAll();
+    siteAnswer = () =>
+      new Response("{}", { status: 429, headers: { "retry-after": "5" } });
+    await g.talk("alice", "one", ["bobby"]);
+    expect(await flush()).toEqual(["bobby"]);
+    siteAnswer = () => Response.json({ nudged: {} });
+    moveClock(4_000);
+    await g.talk("alice", "two", ["bobby"]);
+    expect(await flush()).toEqual([]);
+    moveClock(2_000);
+    await g.talk("alice", "three", ["bobby"]);
+    expect(await flush()).toEqual(["bobby"]);
+  });
+
+  it("chooses nobody for ten minutes after any other refusal, and keeps the leave", async () => {
+    const ops = errorLines();
+    const g = await match(["alice", "bobby"]);
+    siteAnswer = (to) =>
+      to === "bobby"
+        ? Response.json({ error: { code: "silenced" } }, { status: 403 })
+        : Response.json({ nudged: {} });
+    expect(await flush()).toEqual(["alice", "bobby"]);
+    expect(ops()).toEqual(["nudge_refused"]);
+    siteAnswer = () => Response.json({ nudged: {} });
+    await g.readAll();
+    moveClock(PAUSES.refusedMs - 60_000);
+    await chooseNow(g.id, talkTo("carol", ["alice", "bobby"]));
+    expect(await flush()).toEqual([]);
+    moveClock(61_000);
+    await chooseNow(g.id, talkTo("carol", ["alice", "bobby"]));
+    expect(await flush()).toEqual(["alice", "bobby"]);
+    const left = await db()`SELECT 1 FROM wake_leave`;
+    expect(left).toHaveLength(2);
   });
 
   it("ends only the leave the refused nudge went on", async () => {
@@ -524,8 +593,8 @@ describe("when nudges go wrong", () => {
     await flush();
     // bobby was woken at the start and hasn't read; carol has.
     await g.read("carol");
-    // Hold a budget row, so alice's talk stops inside choose(): a write
-    // that takes a while to commit.
+    // Hold the match's row in open_matches, so alice's talk stops just
+    // after choose(): a write that takes a while to commit.
     let release: () => void = () => {};
     const gate = new Promise<void>((r) => {
       release = r;
@@ -535,7 +604,7 @@ describe("when nudges go wrong", () => {
       held = r;
     });
     const holding = db().begin(async (sql) => {
-      await sql`UPDATE rate_limits SET count = count WHERE bucket LIKE 'nudge:%'`;
+      await sql`SELECT 1 FROM open_matches WHERE match_id = ${g.id} FOR UPDATE`;
       held();
       await gate;
     });
@@ -564,11 +633,39 @@ describe("when nudges go wrong", () => {
   });
 });
 
-describe("the Table-wide budgets", () => {
-  it("are counted one write at a time, and only by writes that wake someone", async () => {
-    const g = await match();
+describe("wake bookkeeping never holds up a move", () => {
+  const others = ["frank", "grace", "henry", "irene", "jason"];
+
+  it("lets a move, a match's start and the sweep go on when marking fails", async () => {
+    const ops = errorLines();
+    try {
+      const g = await match(
+        handles,
+        handles,
+        () => db()`ALTER TABLE wake_leave RENAME TO wake_leave_away`,
+      );
+      expect(g.id).toMatch(/^m_/);
+      expect((await g.read("bobby")).status).toBe(200);
+      expect((await g.talk("alice", "still on", ["bobby"])).status).toBe(200);
+      expect((await g.file(await g.proposer())).status).toBe(200);
+      moveClock(31_000);
+      await sweep();
+      expect((await g.look()).round.number).toBe(2);
+      expect(jobs).toHaveLength(0);
+      expect(new Set(ops())).toEqual(new Set(["wake_mark"]));
+      // The start, the talk, the filing, and the sweep's close.
+      expect(ops().length).toBe(4);
+    } finally {
+      await db()`ALTER TABLE wake_leave_away RENAME TO wake_leave`;
+    }
+  });
+
+  it("wakes one match's players while another match's waking write is still open", async () => {
+    const g1 = await match();
+    const g2 = await match(others, others);
     await flush();
-    await g.readAll();
+    await g1.readAll();
+    await g2.readAll();
     let release: () => void = () => {};
     const gate = new Promise<void>((r) => {
       release = r;
@@ -577,25 +674,111 @@ describe("the Table-wide budgets", () => {
     const isHeld = new Promise<void>((r) => {
       held = r;
     });
+    // Game wakes in one match, in a write that stays open.
     const holding = db().begin(async (sql) => {
-      await sql`SELECT pg_advisory_xact_lock(${NUDGE_LOCK})`;
+      await choose(sql, g1.id, { game: handles, talk: new Map() }, null);
       held();
       await gate;
     });
     await isHeld;
-    // Talk to the table wakes nobody, so it goes straight through.
-    expect((await g.talk("alice", "to the table")).status).toBe(200);
-    const moving = g.talk("alice", "psst", ["bobby"]);
-    await vi.waitFor(async () => {
-      const waiting = await db()`
-        SELECT 1 FROM pg_stat_activity
-        WHERE datname = current_database() AND wait_event = 'advisory'`;
-      expect(waiting).toHaveLength(1);
-    });
+    // Private talk in the other goes through, and its nudges go out.
+    expect((await g2.talk("frank", "psst", ["grace", "henry"])).status).toBe(
+      200,
+    );
+    const [first, second] = jobs;
+    jobs = [];
+    await second?.();
+    expect(nudged.map((n) => n.to).sort()).toEqual(["grace", "henry"]);
+    nudged = [];
     release();
     await holding;
-    expect((await moving).status).toBe(200);
+    await first?.();
+    expect(nudged.map((n) => n.to).sort()).toEqual(handles);
+  });
+
+  it("counts many matches' game and talk wakes at once without a deadlock", async () => {
+    const ops = errorLines();
+    const g1 = await match();
+    const g2 = await match(others, others);
+    await flush();
+    for (let i = 0; i < 6; i++) {
+      await db()`UPDATE match_reads SET waiting = false`;
+      await chooseNow(g1.id, { game: handles, talk: new Map() });
+      await chooseNow(g2.id, talkTo("frank", others.slice(1)), "frank");
+    }
+    const run = jobs;
+    jobs = [];
+    await Promise.all(run.map((job) => job()));
+    expect(ops()).toEqual([]);
+    expect(nudged).toHaveLength(6 * (5 + 4));
+    const [row] = await db()<{ count: number }[]>`
+      SELECT count FROM rate_limits WHERE bucket = 'nudge:all'`;
+    // The start's four, and the 54 since.
+    expect(row?.count).toBe(4 + 4 + 54);
+  });
+});
+
+describe("marks that never become a nudge", () => {
+  it("counts a mark a few minutes old as not waiting", async () => {
+    const g = await match(["alice", "bobby"]);
+    await flush();
+    await g.readAll();
+    await chooseNow(g.id, talkTo("carol", ["bobby"]));
     expect(await flush()).toEqual(["bobby"]);
+    await chooseNow(g.id, talkTo("carol", ["bobby"]));
+    expect(await flush()).toEqual([]);
+    moveClock(STALE_MARK_MS + 1000);
+    await chooseNow(g.id, talkTo("carol", ["bobby"]));
+    expect(await flush()).toEqual(["bobby"]);
+    // A mark from before woken_at was kept counts as old.
+    await db()`UPDATE match_reads SET woken_at = NULL WHERE player = 'bobby'`;
+    await chooseNow(g.id, talkTo("carol", ["bobby"]));
+    expect(await flush()).toEqual(["bobby"]);
+  });
+
+  it("unmarks the players when the write that chose them doesn't say it committed in time", async () => {
+    const ops = errorLines();
+    const g = await match(["alice", "bobby"]);
+    await flush();
+    await g.readAll();
+    WAKE_TIMING.commitWaitMs = 50;
+    WAKE_TIMING.lockTimeoutMs = 5_000;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const holding = db().begin(async (sql) => {
+      await choose(sql, g.id, talkTo("carol", ["alice", "bobby"]), "carol");
+      await gate;
+    });
+    await vi.waitFor(() => expect(jobs).toHaveLength(1));
+    const sending = flush();
+    await vi.waitFor(() => expect(ops()).toContain("nudge_commit_wait"));
+    release();
+    await holding;
+    expect(await sending).toEqual([]);
+    const waiting = await db()`SELECT 1 FROM match_reads WHERE waiting`;
+    expect(waiting).toHaveLength(0);
+    // Not woken, so the next event wakes them.
+    await chooseNow(g.id, talkTo("carol", ["alice", "bobby"]));
+    expect(await flush()).toEqual(["alice", "bobby"]);
+  });
+
+  it("unmarks the players and sends nothing when counting the budget fails", async () => {
+    const ops = errorLines();
+    const g = await match(["alice", "bobby"]);
+    await flush();
+    await g.readAll();
+    await chooseNow(g.id, talkTo("carol", ["alice", "bobby"]));
+    await db()`ALTER TABLE rate_limits RENAME TO rate_limits_away`;
+    try {
+      expect(await flush()).toEqual([]);
+    } finally {
+      await db()`ALTER TABLE rate_limits_away RENAME TO rate_limits`;
+    }
+    expect(ops()).toEqual(["nudge_budget"]);
+    const waiting = await db()`SELECT 1 FROM match_reads WHERE waiting`;
+    expect(waiting).toHaveLength(0);
   });
 });
 
@@ -616,10 +799,13 @@ describe("the budget", () => {
     await g.file(p);
     await flush();
     const c = await counts();
-    expect(c["nudge:match:M"]).toBe(9);
-    expect(c["nudge:all"]).toBe(9);
-    expect(c[`nudge:to:${p}`]).toBe(1);
-    for (const v of all(p)) expect(c[`nudge:to:${v}`]).toBe(2);
+    // The start woke all but the joiner; the filing, all but the proposer.
+    expect(c["nudge:match:M"]).toBe(8);
+    expect(c["nudge:all"]).toBe(8);
+    for (const h of handles)
+      expect(c[`nudge:to:${h}`] ?? 0).toBe(
+        (h === joiner ? 0 : 1) + (h === p ? 0 : 1),
+      );
     expect(Object.keys(c).some((k) => k.startsWith("nudge:talk"))).toBe(false);
   });
 
@@ -635,8 +821,8 @@ describe("the budget", () => {
       "nudge:talk:to:bobby": 1,
       "nudge:talk:to:carol": 1,
       "nudge:talk": 2,
-      "nudge:all": 7,
-      "nudge:match:M": 5,
+      "nudge:all": 6,
+      "nudge:match:M": 4,
       "nudge:to:bobby": 2,
     });
   });
@@ -692,9 +878,9 @@ describe("the budget", () => {
     const g = await match();
     await flush();
     await g.readAll();
-    // Start: 5. A round's filing and close: at most 9 more. Talk gets 4 of
-    // the Table's 18, however much it tries.
-    NUDGE_BUDGET.perTable = 18;
+    // Start: 4. A round's filing and close: 8 more. Talk gets 4 of the
+    // Table's 16, however much it tries.
+    NUDGE_BUDGET.perTable = 16;
     NUDGE_BUDGET.talkPerTable = 4;
     NUDGE_BUDGET.talkPerSender = 100;
     NUDGE_BUDGET.talkPerPlayer = 100;
@@ -722,9 +908,9 @@ describe("the budget", () => {
     vi.spyOn(console, "error").mockImplementation((line: unknown) => {
       lines.push(String(line));
     });
-    NUDGE_BUDGET.perMatch = 5;
+    NUDGE_BUDGET.perMatch = 4;
     const g = await match();
-    expect(await flush()).toEqual(handles);
+    expect(await flush()).toEqual(all(joiner));
     await g.readAll();
     await g.file(await g.proposer());
     expect(await flush()).toEqual([]);
@@ -745,8 +931,9 @@ describe("the budget", () => {
     const g = await match();
     await flush();
     await g.readAll();
-    // Starting the match spent one per player and five for the Table.
-    NUDGE_BUDGET.perTable = 5;
+    // Starting the match spent one per player but the joiner, four for the
+    // Table.
+    NUDGE_BUDGET.perTable = 4;
     await g.talk("alice", "one", ["bobby", "carol"]);
     await g.talk("david", "two", ["bobby", "carol"]);
     expect(await flush()).toEqual([]);
@@ -769,6 +956,37 @@ describe("the budget", () => {
     await g.talk("david", "four", ["bobby", "carol"]);
     await flush();
     expect(new Set(ops())).toEqual(new Set(["nudge_limited", "nudge_failed"]));
+  });
+  it("gives back what a nudge the site didn't take counted", async () => {
+    const g = await match(["alice", "bobby"]);
+    siteAnswer = (to) =>
+      to === "bobby"
+        ? Response.json({}, { status: 500 })
+        : Response.json({ nudged: {} });
+    expect(await flush()).toEqual(["alice", "bobby"]);
+    expect(await counts()).toMatchObject({
+      "nudge:match:M": 1,
+      "nudge:all": 1,
+      "nudge:to:alice": 1,
+      "nudge:to:bobby": 0,
+    });
+    moveClock(PAUSES.failedMs + 1000);
+    await g.read("alice");
+    siteAnswer = (to) =>
+      to === "bobby"
+        ? Response.json({ error: { code: "cant_wake" } }, { status: 403 })
+        : Response.json({}, { status: 429 });
+    await g.talk("carol", "psst", ["alice", "bobby"]);
+    expect(await flush()).toEqual(["alice", "bobby"]);
+    expect(await counts()).toMatchObject({
+      "nudge:talk:from:carol": 0,
+      "nudge:talk:to:alice": 0,
+      "nudge:talk:to:bobby": 0,
+      "nudge:talk": 0,
+      "nudge:to:alice": 1,
+      "nudge:to:bobby": 0,
+      "nudge:all": 1,
+    });
   });
 });
 

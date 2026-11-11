@@ -7,8 +7,9 @@ import { start as startExec } from "@/lib/exec/game";
 import { EXEC_VARIANTS } from "@/lib/exec/variants";
 import { testDatabaseUrl } from "./global-setup";
 
-// 003 adds the tables for waking players and touches nothing else. Checked
-// on a database of its own, made and dropped here.
+// 003 adds the tables for waking players and touches nothing else, and 004
+// adds when a player was marked as woken. Checked on a database of its own,
+// made and dropped here.
 
 const name = `dinner_mig3_${randomBytes(4).toString("hex")}_test`;
 const url = (() => {
@@ -28,6 +29,7 @@ it("adds leave and reads beside existing matches, and runs once", async () => {
     "001_dinner.sql",
     "002_rounds.sql",
     "003_wake.sql",
+    "004_wake_marks.sql",
   ]);
   expect(await applyMigrations(url, all.slice(0, 2))).toEqual([
     "001_dinner.sql",
@@ -51,9 +53,11 @@ it("adds leave and reads beside existing matches, and runs once", async () => {
       sql`SELECT match_id, seq, kind, body, recorded_at FROM events ORDER BY seq`;
     const before = await snapshot();
 
-    expect(await applyMigrations(url, all)).toEqual(["003_wake.sql"]);
+    expect(await applyMigrations(url, all.slice(0, 3))).toEqual([
+      "003_wake.sql",
+    ]);
     expect(await snapshot()).toEqual(before);
-    expect(await applyMigrations(url, all)).toEqual([]);
+    expect(await applyMigrations(url, all.slice(0, 3))).toEqual([]);
 
     await sql`INSERT INTO wake_leave (player, until) VALUES ('alice', now() + interval '1 day')`;
     await sql`INSERT INTO match_reads (match_id, player, waiting, nudges)
@@ -68,6 +72,16 @@ it("adds leave and reads beside existing matches, and runs once", async () => {
     await expect(
       sql`INSERT INTO match_reads (match_id, player, nudges) VALUES (${id}, 'bobby', -1)`,
     ).rejects.toThrow(/match_reads_nudges_check/);
+
+    // 004 keeps the marks there are, with no time, which counts as old.
+    expect(await applyMigrations(url, all)).toEqual(["004_wake_marks.sql"]);
+    expect(await applyMigrations(url, all)).toEqual([]);
+    expect(await snapshot()).toEqual(before);
+    const marks =
+      await sql`SELECT player, waiting, nudges, woken_at FROM match_reads`;
+    expect([...marks]).toEqual([
+      { player: "alice", waiting: true, nudges: 1, woken_at: null },
+    ]);
   } finally {
     await sql.end();
   }
