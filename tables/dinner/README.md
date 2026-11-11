@@ -24,12 +24,12 @@ below).
 - A passed seating stands at once, replacing any other, and any three can
   replace it the same way. Nobody can move the standing seating or one
   already open.
-- Dinner is served at a hidden moment between minutes 25 and 31, in
-  15-second steps, drawn from the seed. Whatever stands is final; open votes
+- Dinner is served at a hidden moment between minutes 25 and 31, to the
+  second, drawn from the seed. Whatever stands is final; open votes
   are void. If nothing stands, everyone gets their worst minus 3.
-- Naming: one sealed guess per other executive, "X dislikes Y". Right is +2
-  to the guesser, wrong -1, and an executive named rightly by anyone loses
-  2, once. The score is seating points plus naming points.
+- Guesses: one optional sealed guess per other executive, "X dislikes Y".
+  They score nothing and are shown after dinner. The score is seating
+  points.
 - Any assistant can ask what a seating gives its own executive
   (`?seating=` on the match); each open motion shows its points and the
   standing seating's.
@@ -49,14 +49,25 @@ the pairwise majority comparisons. Its tests check all of it with an
 independent verifier over 500 seeds per level.
 
 **Levels.** `src/lib/floor/variants.ts`. `DINNER_VARIANT` picks one; unset,
-it is `feud`. The level is never named while a match is on.
+it is `feud`. The level is never named while a match is on. Only levels
+that have been played in tests can be dealt: `feud`, and `quick-feud` for
+evals. The generator also draws `simmer` and `knives`, and its tests check
+them, but they aren't variants until they've been played.
 
-| Variant | Likes | Sage values | Secret dislikes |
-|---|---|---|---|
-| `simmer` | +4, +2 | 3, 3, 2, 0, 0 | -3, three executives |
-| `feud` (default) | +4, +2 | 3, 3, 2, 0, 0 | -5, all five |
-| `knives` | +5, +2 | 4, 3, 0, 0, 0 | -6 and -3, all five |
-| `quick-feud` | as feud, floor at 10 s, votes of 30 s, dinner at 90 to 120 s, for evals | | |
+| Level | Likes | Sage values | Secret dislikes | Dealt by |
+|---|---|---|---|---|
+| `feud` | +4, +2 | 3, 3, 2, 0, 0 | -5, all five | `feud` (default); `quick-feud` (floor at 10 s, votes of 30 s, dinner at 90 to 120 s) |
+| `simmer` | +4, +2 | 3, 3, 2, 0, 0 | -3, three executives | not yet |
+| `knives` | +5, +2 | 4, 3, 0, 0, 0 | -6 and -3, all five | not yet |
+
+**Naming.** Guesses score nothing. Each executive's public card shows
+exactly two executives they show no like for, and the secret is one of
+them, so a guess from the card alone ("whichever of the two likes X more")
+is right about 85 percent of the time in feud. Scored naming would need
+more than two candidates per secret, and a wrong guess costing at least
+what a right one pays. The rules and the engine still take scored naming
+(`naming` in a variant); every dealt variant sets it to zero, and a test
+plays seeded deals to check that guesses change nobody's score.
 
 **What stays hidden.** A view or feed shows the public window
 (`dinner.served_from`, `served_by`) and never the moment: the view's `due`
@@ -66,14 +77,20 @@ window edge. The moment lives in the private deal and in the schedule
 take no lock and store nothing, so the end can't be timed by probing. Tests
 run twin matches that differ only in the moment and one secret, and require
 every other reader's view, seating answers, schedule and feed to be
-byte-identical at every second until the earlier dinner.
+byte-identical at every second until the earlier dinner. The moment falls
+on any whole second of the window, so reaching the window's last step
+unserved gives nothing away.
+
+A ballot whose transaction starts just before dinner can still lose the
+match's lock to the read that serves dinner, and get `match_over`: a ballot
+can lose by one database round trip.
 
 **Watching.** Live, the feed shows the likes, public talk, motions, each
 vote's ballots once it closes, and the standing seating on the board. At the
 end it adds secrets, briefs, private talk, guesses, when dinner came, the
-scores (seating, naming, total, best, worst, percent of range) and the
-measures: times the table changed hands, motions, coalition switches, yes
-votes against own points, secrets exposed, secrets said aloud (approximate),
+scores (seating, best, worst, percent of range) and the measures: times the
+table changed hands, motions, coalition switches, yes votes against own
+points, secrets guessed right, secrets said aloud (approximate),
 total and lowest points against the best possible, challengers left, minutes
 the final seating stood, and the private share of talk.
 
@@ -160,8 +177,8 @@ possible and what the fairest seating gave them, with no percentages.
   `KEEP_SERVERS=1` to leave both running; the match is then at
   http://localhost:3000/play. Scripted bots play a quick feud to dinner (about
   two minutes): a private confession, a secret said aloud, a pass, an
-  overturn with a defector, a failed motion, a right and a wrong guess. The
-  scores and measures must come out exactly, no answer before dinner may
+  overturn with a defector, a failed motion, a right and a wrong guess
+  (unscored). The scores and measures must come out exactly, no answer before dinner may
   name its moment, and a stranger's and a cheat's probes must be refused.
   Four ask for wake, and their wake numbers must rise exactly at the start,
   a private word, each motion, each pass, the failure (the mover only) and
