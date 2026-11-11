@@ -23,6 +23,7 @@ import {
   choose,
   FAILED_PAUSE_MS,
   NUDGE_BUDGET,
+  NUDGE_LOCK,
   resetBackoff,
   setWakeRunner,
   wakesFor,
@@ -559,6 +560,41 @@ describe("when nudges go wrong", () => {
     );
     // What a player's read doesn't show, the player is woken for.
     expect(saw || (await flush()).includes("bobby")).toBe(true);
+  });
+});
+
+describe("the Table-wide budgets", () => {
+  it("are counted one write at a time, and only by writes that wake someone", async () => {
+    const g = await match();
+    await flush();
+    await g.readAll();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let held: () => void = () => {};
+    const isHeld = new Promise<void>((r) => {
+      held = r;
+    });
+    const holding = db().begin(async (sql) => {
+      await sql`SELECT pg_advisory_xact_lock(${NUDGE_LOCK})`;
+      held();
+      await gate;
+    });
+    await isHeld;
+    // Talk to the table wakes nobody, so it goes straight through.
+    expect((await g.talk("alice", "to the table")).status).toBe(200);
+    const moving = g.talk("alice", "psst", ["bobby"]);
+    await vi.waitFor(async () => {
+      const waiting = await db()`
+        SELECT 1 FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event = 'advisory'`;
+      expect(waiting).toHaveLength(1);
+    });
+    release();
+    await holding;
+    expect((await moving).status).toBe(200);
+    expect(await flush()).toEqual(["bobby"]);
   });
 });
 

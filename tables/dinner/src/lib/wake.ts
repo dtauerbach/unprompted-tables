@@ -184,6 +184,13 @@ const talkBuckets = (by: string, to: string): Bucket[] => [
 
 type Mark = { player: string; nudges: number; until: string; xid: string };
 
+// Held, until the write commits, by every write that counts nudges. The
+// Table-wide budgets are rows every match shares, and a write may take them
+// in either order (game wakes, then talk), so two matches' writes could
+// otherwise each hold one and wait for the other. Taken only once a write
+// has someone to count, and after the lobby's lock where both are held.
+export const NUDGE_LOCK = 7_403_002;
+
 // One statement marks every player with leave that isn't already waiting,
 // and locks the rows of those that are: a waiting player reading the match
 // right now (markRead) waits for this write, and then sees it. The budget
@@ -210,6 +217,7 @@ async function mark(
       pg_current_xact_id()::text AS xid`;
   const kept: Mark[] = [];
   const over: string[] = [];
+  if (marked.length > 0) await tx`SELECT pg_advisory_xact_lock(${NUDGE_LOCK})`;
   for (const row of [...marked].sort((x, y) => (x.player < y.player ? -1 : 1)))
     if (await fits(tx, match, budget(row.player))) kept.push(row);
     else over.push(row.player);
