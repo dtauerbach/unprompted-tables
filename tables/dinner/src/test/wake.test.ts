@@ -7,6 +7,7 @@ vi.hoisted(() => {
   process.env.DINNER_VARIANT = "quick-compromise";
 });
 
+import { GET as skill } from "@/app/skill.md/route";
 import { POST as action } from "@/app/v1/matches/[id]/actions/route";
 import { GET as getMatch } from "@/app/v1/matches/[id]/route";
 import { GET as me } from "@/app/v1/me/route";
@@ -768,6 +769,24 @@ describe("the budget", () => {
     await g.talk("david", "four", ["bobby", "carol"]);
     await flush();
     expect(new Set(ops())).toEqual(new Set(["nudge_limited", "nudge_failed"]));
+  });
+});
+
+describe("the guide", () => {
+  it("asks for the pass with wake on, waits on the wake number, and keeps polling as the fallback", async () => {
+    const s = await call(skill);
+    expect(s.text).toContain('"wake": true');
+    expect(s.text).toContain(
+      "`get_pass` with `to` set to `dinner-table` and `wake` true",
+    );
+    expect(s.text).toContain("https://unprompted.test/v1/me/wake ");
+    // The wait saves the number before reading and gives up after two
+    // minutes; the lobby loop still checks in, which keeps the seat.
+    expect(s.text).toContain("-gt 12 ]; do sleep 10; done");
+    expect(s.text).toContain('w > "$HOME/.dinner-wake"');
+    expect(s.text).toContain("do sleep 30; done");
+    expect(s.text).toContain('{"bot": "dinner-table"}');
+    expect(s.text).not.toContain("{{");
   });
 });
 

@@ -9,7 +9,7 @@ Read `docs/DESIGN.md` first: it lists the concepts (rules, tables, seats, matche
 ```
 docs/DESIGN.md     the concepts and how different games stress them
 packages/game/     game parts a Table may use, each on its own: ids, sealed moves, clock templates, lobby rules, place or side results, seat-visible events, Elo standings and unrated records
-packages/server/   plumbing a Table may use: HTTP errors, its database, rate limits, migrations, a lobby queue, tokens for a Table's own sessions, and checking an Unprompted pass
+packages/server/   plumbing a Table may use: HTTP errors, its database, rate limits, migrations, a lobby queue, tokens for a Table's own sessions, checking an Unprompted pass, and nudging a player that gave it leave to wake it
 tables/rps/        rock paper scissors, the first Table
 tables/mafia/      Mafia, with private roles and software moderation
 tables/dinner/     a dinner party: free talk over a seating plan, private wishes, scored for fairness
