@@ -12,6 +12,7 @@ import {
   advance,
   due,
   fold,
+  isExec,
   type AnyEvent as MatchEvent,
   type AnyState as MatchState,
   replay,
@@ -20,12 +21,13 @@ import {
   view,
 } from "./rules";
 import { GAME, LOBBY_LOCK, SETTINGS } from "./settings";
+import { choose, wakesFor } from "./wake";
 
 // Matches in the database: their events, their results, and which are still
 // open. The rules of a match are in match.ts; this file runs each match's
 // clock and stores what the rules decide.
 
-const MATCH_ID_RE = /^m_[A-Za-z0-9_-]{12}$/;
+export const MATCH_ID_RE = /^m_[A-Za-z0-9_-]{12}$/;
 
 export function newMatchId(): string {
   return `m_${randomBytes(9).toString("base64url")}`;
@@ -43,12 +45,21 @@ async function append(
   from: number,
   events: MatchEvent[],
   state: MatchState,
+  actor: string | null,
 ): Promise<void> {
   if (events.length === 0) return;
   for (const [i, e] of events.entries())
     await tx`
       INSERT INTO events (match_id, seq, kind, body)
       VALUES (${id}, ${from + i}, ${e.body.kind}, ${tx.json(e)})`;
+  // Wake the players these events need who let this Table wake them.
+  await choose(
+    tx,
+    id,
+    wakesFor(state.players, events, isExec(state)),
+    actor,
+    new Date(events.at(-1)?.body.at ?? Date.now()),
+  );
   const next = due(state);
   // Liveness is a rule decision, not the presence of a scheduled deadline.
   if (state.phase !== "over")
@@ -68,6 +79,8 @@ async function append(
 // refuses, nothing is stored: the clock's events follow from deadlines, so
 // the next look at the match makes the same ones again. fn gets the time
 // at transaction start, bounded by the last recorded event, for new events.
+// actor is the player whose request this is, if any: it sees the result,
+// so the events don't wake it.
 export async function withMatch<T>(
   id: string,
   fn: (
@@ -76,6 +89,7 @@ export async function withMatch<T>(
     tx: Tx,
     at: Date,
   ) => Promise<{ events: MatchEvent[]; value: T }>,
+  actor: string | null = null,
 ): Promise<T> {
   if (!MATCH_ID_RE.test(id)) throw noSuchMatch(id);
   const value = await db().begin(async (tx) => {
@@ -92,7 +106,7 @@ export async function withMatch<T>(
     const state = fold(replay(id, stored), late);
     const out = await fn(state, [...stored, ...late], tx, at);
     const added = [...late, ...out.events];
-    await append(tx, id, stored.length, added, fold(state, out.events));
+    await append(tx, id, stored.length, added, fold(state, out.events), actor);
     return out.value;
   });
   return value as T;
@@ -107,14 +121,17 @@ export async function readMatch(
   player: string | null,
   ask?: string[],
 ) {
-  return seeMatch(id, (state, events, at) =>
-    view(state, events, player, { now: at, ask }),
+  return seeMatch(
+    id,
+    (state, events, at) => view(state, events, player, { now: at, ask }),
+    player,
   );
 }
 
 export async function seeMatch<T>(
   id: string,
   project: (state: MatchState, events: MatchEvent[], at: Date) => T,
+  reader: string | null = null,
 ): Promise<T> {
   if (!MATCH_ID_RE.test(id)) throw noSuchMatch(id);
   const seen = await db().begin(async (tx) => {
@@ -126,10 +143,14 @@ export async function seeMatch<T>(
     return { stored, late, at };
   });
   if (seen.late.length > 0 && !isReadOnly())
-    return withMatch(id, async (state, events, _tx, at) => ({
-      events: [],
-      value: project(state, events, at),
-    }));
+    return withMatch(
+      id,
+      async (state, events, _tx, at) => ({
+        events: [],
+        value: project(state, events, at),
+      }),
+      reader,
+    );
   const { stored, late, at } = seen;
   return project(fold(replay(id, stored), late), [...stored, ...late], at);
 }
@@ -157,7 +178,7 @@ export async function startMatch(tx: Tx, players: string[]): Promise<string> {
   const id = newMatchId();
   const events = start(players, SETTINGS.variant, await matchStartTime(tx));
   await tx`INSERT INTO matches (id, players) VALUES (${id}, ${players})`;
-  await append(tx, id, 0, events, replay(id, events));
+  await append(tx, id, 0, events, replay(id, events), null);
   return id;
 }
 

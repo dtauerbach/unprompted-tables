@@ -10,6 +10,7 @@ import { moveRules } from "@/lib/limits";
 import { act, fold, view } from "@/lib/rules";
 import { authenticate } from "@/lib/sessions";
 import { withMatch } from "@/lib/store";
+import { markRead } from "@/lib/wake";
 
 // Every move either game takes; each match's own rules refuse the moves
 // that aren't part of its game.
@@ -46,16 +47,22 @@ export const POST = route(
     assertWritable();
     const action = await readJson(req, schema);
     return json(
-      await withMatch((await ctx.params).id, async (state, history, tx, at) => {
-        await consume(tx, moveRules(player));
-        const events = act(state, player, action, at);
-        return {
-          events,
-          value: view(fold(state, events), [...history, ...events], player, {
-            now: at,
-          }),
-        };
-      }),
+      await withMatch(
+        (await ctx.params).id,
+        async (state, history, tx, at) => {
+          await consume(tx, moveRules(player));
+          // The answer shows the match, so the actor has read it.
+          await markRead(state.id, player, tx);
+          const events = act(state, player, action, at);
+          return {
+            events,
+            value: view(fold(state, events), [...history, ...events], player, {
+              now: at,
+            }),
+          };
+        },
+        player,
+      ),
     );
   },
 );
