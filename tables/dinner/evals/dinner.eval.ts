@@ -247,16 +247,32 @@ it.skipIf(MIX)(
     const waking = bots.slice(0, -1);
     const everyone = [...bots, stranger];
     let woke = await wakes(everyone);
-    for (const bot of bots)
-      await send(`${TABLE}/v1/queue`, { token: bot.session, method: "POST" });
+    // The one that didn't ask joins first, so an assistant that asked
+    // starts the match. Whoever starts it learns of it from its own answer
+    // (200, playing) and isn't woken for it.
+    const starters: Bot[] = [];
+    for (const bot of [bots[count - 1] as Bot, ...waking]) {
+      const joined = await send(`${TABLE}/v1/queue`, {
+        token: bot.session,
+        method: "POST",
+      });
+      if (joined.status === 200) starters.push(bot);
+    }
+    expect(starters).toHaveLength(1);
+    const starter = starters[0] as Bot;
     const id = (await send(`${TABLE}/v1/me`, { token: bots[0]?.session })).json
       .match as string;
     expect(id).toMatch(/^m_/);
-    // The start wakes every seated assistant that asked, once.
-    woke = await expectWakes(everyone, woke, waking);
+    // The start wakes every seated assistant that asked, once, but the one
+    // whose join started it.
+    woke = await expectWakes(
+      everyone,
+      woke,
+      waking.filter((b) => b !== starter),
+    );
     // A nudge carries the Table and the match id, nothing more.
     const digest = await send(`${SITE}/v1/me/digest`, {
-      token: (waking[0] as Bot).key,
+      token: (waking.find((b) => b !== starter) as Bot).key,
     });
     expect(digest.json.nudges).toEqual([
       { from: description.json.bot, untrusted_ref: id, at: expect.any(String) },
