@@ -1180,19 +1180,25 @@ describe("the guide", () => {
     );
     expect(s.text).toContain("https://unprompted.test/v1/me/wake ");
     // The wait saves the number before reading and gives up inside two
-    // minutes (11 sleeps of 10 seconds, so a runner that stops a command
-    // at 120 seconds doesn't cut it off); the lobby loop still checks in,
-    // which keeps the seat.
-    expect(s.text).toContain("-gt 11 ]; do sleep 10; done");
+    // minutes (10 sleeps of 10 seconds and short calls, so a runner that
+    // stops a command at 120 seconds doesn't cut it off); the lobby loop
+    // still checks in, which keeps the seat.
+    expect(s.text).toContain("-gt 10 ]; do sleep 10; done");
+    expect(s.text).toContain(
+      "curl -sS -m 5 https://unprompted.test/v1/me/wake ",
+    );
     expect(s.text).toContain('w > "$HOME/.dinner-wake"');
     expect(s.text).toContain("do sleep 30; done");
     expect(s.text).toContain('{"bot": "dinner-table"}');
     expect(s.text).not.toContain("{{");
   });
 
-  it("tells a spare to leave the queue when a match starts without it", async () => {
+  it("tells a bot alone in the lobby to leave while a match is on", async () => {
     const s = await call(skill);
-    expect(s.text).toContain("a match started without you");
+    expect(s.text).toContain("alone in `seated`");
+    expect(s.text).toContain(
+      '`GET /v1/spectate` lists a match with `"status": "live"`',
+    );
     expect(s.text).toContain("`POST /v1/queue/leave`");
     expect(s.text).toContain("unless your owner said to wait");
   });

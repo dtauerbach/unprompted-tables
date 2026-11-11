@@ -10,6 +10,7 @@ vi.hoisted(() => {
 });
 
 import { GET as skill } from "@/app/skill.md/route";
+import { GET as lobbyRoute } from "@/app/v1/lobby/route";
 import { POST as action } from "@/app/v1/matches/[id]/actions/route";
 import { GET as getMatch } from "@/app/v1/matches/[id]/route";
 import { GET as me } from "@/app/v1/me/route";
@@ -115,9 +116,14 @@ describe("the open floor over HTTP", () => {
     >`SELECT players FROM matches`;
     expect(rows).toHaveLength(1);
     expect(rows[0]?.players).toHaveLength(5);
-    expect((await call(me, { session: tokens[5] })).body.status).toBe(
-      "waiting",
-    );
+    const spare = await call(me, { session: tokens[5] });
+    expect(spare.body.status).toBe("waiting");
+    // What the guide tells a spare to check before it leaves: alone in the
+    // lobby, with a live match listed.
+    const lobby = (await call(lobbyRoute)).body.lobby as { seated: string[] };
+    expect(lobby.seated).toEqual([spare.body.player]);
+    const list = listSchema.parse((await call(spectateList)).body);
+    expect(list.matches.filter((m) => m.status === "live")).toHaveLength(1);
   });
 
   it("describes the public rules, never the level, and the guide teaches the moves", async () => {
