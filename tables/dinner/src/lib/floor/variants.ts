@@ -108,7 +108,9 @@ function variant(level: Level, name: string = level): FloorVariant {
     level,
     floor_opens: 180,
     vote_seconds: 120,
-    served: { from: 1500, to: 1860, step: 15 },
+    // Any whole second: on a coarser grid, a match still unserved one
+    // step before the end would give the end away.
+    served: { from: 1500, to: 1860, step: 1 },
     motions_per_assistant: 3,
     messages_per_assistant: 40,
     message_chars: 600,
@@ -128,7 +130,7 @@ export const FLOOR_VARIANTS: Record<string, FloorVariant> = {
     ...variant("feud", "quick-feud"),
     floor_opens: 10,
     vote_seconds: 30,
-    served: { from: 90, to: 120, step: 5 },
+    served: { from: 90, to: 120, step: 1 },
   },
 };
 

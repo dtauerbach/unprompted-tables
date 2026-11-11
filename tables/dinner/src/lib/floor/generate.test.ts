@@ -10,7 +10,12 @@ import {
   MAX_TRIES,
   servedAfter,
 } from "./generate";
-import { FLOOR_VARIANTS, LEVELS, type Level } from "./variants";
+import {
+  FLOOR_VARIANTS,
+  type FloorVariant,
+  LEVELS,
+  type Level,
+} from "./variants";
 
 // The generator's promises, checked by a brute force of the test's own
 // that shares no code with generate.ts: over every one of the 60 seatings,
@@ -212,25 +217,41 @@ describe("the open floor's deals", () => {
     });
   });
 
-  it("serves dinner in the window, in its steps, from a stream of its own", () => {
-    const w = (
-      FLOOR_VARIANTS.feud as {
-        served: { from: number; to: number; step: number };
-      }
-    ).served;
-    expect(w).toEqual({ from: 1500, to: 1860, step: 15 });
+  it("serves dinner at any second of the window, from a stream of its own", () => {
+    for (const v of Object.values(FLOOR_VARIANTS))
+      expect(v.served.step).toBe(1);
+    const w = (FLOOR_VARIANTS.feud as FloorVariant).served;
+    expect(w).toEqual({ from: 1500, to: 1860, step: 1 });
     const seen = new Set<number>();
-    for (let s = 0; s < 2000; s++) {
+    for (let s = 0; s < 4000; s++) {
       const t = servedAfter(`served-${s}`, w);
+      expect(Number.isInteger(t)).toBe(true);
       expect(t).toBeGreaterThanOrEqual(1500);
       expect(t).toBeLessThanOrEqual(1860);
-      expect((t - 1500) % 15).toBe(0);
       seen.add(t);
     }
-    // Every one of the 25 moments comes up, the first and last included.
-    expect(seen.size).toBe(25);
+    // Not confined to a grid: no step coarser than a second holds every
+    // moment drawn, and nearly all 361 seconds come up.
+    for (const step of [2, 3, 5, 10, 15, 30, 60])
+      expect([...seen].every((t) => (t - 1500) % step === 0)).toBe(false);
+    expect(seen.size).toBeGreaterThan(340);
+    const gaps = [...seen]
+      .sort((a, b) => a - b)
+      .map((t, k, a) => t - (a[k - 1] ?? t));
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(5);
     // The deal's stream doesn't move the served time, nor the other way.
     expect(servedAfter("x", w)).toBe(servedAfter("x", w));
     expect(dealFor("x", "feud")).toEqual(dealFor("x", "feud"));
+  });
+
+  it("still draws an old grid's steps when a window asks for them", () => {
+    const w = { from: 1500, to: 1860, step: 15 };
+    const seen = new Set<number>();
+    for (let s = 0; s < 2000; s++) {
+      const t = servedAfter(`served-${s}`, w);
+      expect((t - 1500) % 15).toBe(0);
+      seen.add(t);
+    }
+    expect(seen.size).toBe(25);
   });
 });
