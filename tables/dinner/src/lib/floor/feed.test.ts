@@ -83,8 +83,8 @@ describe("the live feed", () => {
 
 describe("the finished feed", () => {
   // A scripted match: a pass, an overturn with one switcher, a failure by
-  // three noes, one by time, a right guess and a wrong one, and a secret
-  // said aloud by someone other than its holder.
+  // three noes, one by time, a right guess and a wrong one, and gossip
+  // about a secret, which counts as nothing.
   function scripted(v: FloorVariant = FEUD) {
     const g = floorMatch(v);
     const d = g.state.deal;
@@ -95,8 +95,7 @@ describe("the finished feed", () => {
     const wrong = EXECUTIVES.find(
       (x) => x !== A && x !== secret && x !== D,
     ) as string;
-    // The holder's own word doesn't count as said aloud; Casey's does,
-    // unless Casey is the one disliked, in which case Devon says it.
+    // Casey gossips, unless Casey is the one disliked; then Devon does.
     const teller = secret === C ? D : C;
     g.talk(A, `between us, I can't stand ${secret}`, 1, [B]);
     g.talk(teller, `I hear Avery and ${secret} don't get on`, 2);
@@ -114,11 +113,11 @@ describe("the finished feed", () => {
     g.vote(D, 3, "no", OPEN + 2);
     g.move(A, S4, OPEN + 3);
     g.tick(g.served());
-    return { g, d, secret, teller };
+    return { g, d, secret };
   }
 
   it("measures the match exactly", () => {
-    const { g, d, secret, teller } = scripted();
+    const { g, d } = scripted();
     const m = measure(g.state, g.events);
     expect(m).toMatchObject({
       changedHands: 1,
@@ -138,8 +137,6 @@ describe("the finished feed", () => {
       ],
     });
     expect(m.switchesBy).toEqual([0, 1, 0, 0, 0]);
-    const aloud = m.saidAloud.find((x) => x.holder === A);
-    expect(aloud).toMatchObject({ target: secret, from: teller });
     // Final seating S2's points, against every seating.
     const final = points(d, idx(S2));
     expect(m.total).toBe(final.reduce((a, b) => a + b, 0));
@@ -203,7 +200,8 @@ describe("the finished feed", () => {
     expect(avery).toContain(
       `Secret: ${secret} -5. Guessed rightly by ${B}'s assistant.`,
     );
-    expect(avery).toContain("First said aloud by");
+    // Gossip isn't measured: names in one message are no evidence.
+    expect(text).not.toContain("said aloud");
     expect(avery.split("\n")[0]).toMatch(/^Points -?\d+\.$/);
     expect(text).toContain(`${A} dislikes ${secret}, right.`);
     expect(text).toContain(", wrong.");
@@ -231,7 +229,6 @@ describe("the finished feed", () => {
       "Coalition switches",
       "Yes votes against own points",
       "Secrets guessed right",
-      "Secrets said aloud (approximate)",
       "Total points",
       "Lowest executive's points",
       "Challengers left",
@@ -279,32 +276,6 @@ describe("the finished feed", () => {
     expect(f.outcome?.measures[4]?.note).toBe(
       "Guessed rightly by someone, of 5 dealt. Guesses: 1 right, 1 wrong.",
     );
-  });
-
-  it("keeps a brief's points line however long the quotes said aloud", () => {
-    const g = floorMatch();
-    const d = g.state.deal;
-    if (!d) throw new Error("no deal");
-    // Every executive's secret said aloud by another, at full length.
-    const long = (x: string, y: string) =>
-      `${x} and ${y} `.padEnd(FEUD.message_chars, "\u8a9e");
-    EXECUTIVES.forEach((x, i) => {
-      for (const t of d.secrets[i] as number[]) {
-        const y = EXECUTIVES[t] as string;
-        const teller = EXECUTIVES.find((z) => z !== x && z !== y) as string;
-        g.talk(teller, long(x, y), 1);
-      }
-    });
-    g.tick(g.served());
-    const f = feedSchema.parse(g.feed());
-    const briefs = f.outcome?.reveals.slice(0, 5) ?? [];
-    expect(briefs).toHaveLength(5);
-    for (const [i, r] of briefs.entries()) {
-      expect(r.text.length).toBeLessThanOrEqual(LIMITS.reveal);
-      expect(r.text.split("\n")[0]).toBe(`Points ${g.state.end?.points[i]}.`);
-      expect(r.text).toContain("First said aloud by");
-      expect(r.text).toContain("\u2026");
-    }
   });
 
   it("names the first of a many-way tie for most switches, and counts the rest", () => {

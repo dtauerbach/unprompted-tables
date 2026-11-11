@@ -10,18 +10,8 @@ import {
 import { challengers, N, pointsTable, SEATINGS } from "./generate";
 
 // What a finished match measures (design.md, section 4), computed from the
-// events and the deal, every one exact except the one marked approximate.
+// events and the deal, every one exact.
 // Only for a match that's over: most of these need the secrets.
-
-export type SaidAloud = {
-  holder: string;
-  target: string;
-  // The first message, by someone other than the holder's assistant, that
-  // names both: who sent it, when, and its text.
-  from: string | null;
-  at: string | null;
-  text: string | null;
-};
 
 export type Measures = {
   // Passes after the first.
@@ -44,8 +34,6 @@ export type Measures = {
   dealt: number;
   guessesRight: number;
   guessesWrong: number;
-  // Secrets whose two names appear together in someone else's message.
-  saidAloud: SaidAloud[];
   total: number;
   highestTotal: number;
   lowest: number;
@@ -60,9 +48,6 @@ export type Measures = {
   // Each pass's yes set, by executive, in order.
   passes: { motion: number; yes: string[] }[];
 };
-
-const named = (text: string, who: string) =>
-  new RegExp(`(^|[^\\p{L}\\p{N}])${who}($|[^\\p{L}\\p{N}])`, "iu").test(text);
 
 export function measure(s: FloorState, events: FloorEvent[]): Measures {
   const end = s.end;
@@ -123,32 +108,12 @@ export function measure(s: FloorState, events: FloorEvent[]): Measures {
       } else guessesWrong++;
     }
 
-  // Secrets said aloud: approximate, by names alone.
+  // Every message, public or private, for the private share.
   const talk = events.flatMap((e) =>
     e.body.kind === "talk"
       ? [{ ...e.body, open: e.audience === "public" }]
       : [],
   );
-  const saidAloud: SaidAloud[] = [];
-  d.secrets.forEach((targets, h) => {
-    for (const x of targets) {
-      const holder = EXECUTIVES[h] as string;
-      const target = EXECUTIVES[x] as string;
-      const first = talk.find(
-        (m) =>
-          exec(m.player) !== h &&
-          named(m.text, holder) &&
-          named(m.text, target),
-      );
-      saidAloud.push({
-        holder,
-        target,
-        from: first ? (EXECUTIVES[exec(first.player)] as string) : null,
-        at: first?.at ?? null,
-        text: first?.text ?? null,
-      });
-    }
-  });
 
   const P = pointsTable(d.weights);
   const final = end.seating_points;
@@ -180,7 +145,6 @@ export function measure(s: FloorState, events: FloorEvent[]): Measures {
     dealt: d.secrets.reduce((n, x) => n + x.length, 0),
     guessesRight,
     guessesWrong,
-    saidAloud,
     total: final.reduce((a, b) => a + b, 0),
     highestTotal: Math.max(...totals),
     lowest: Math.min(...final),

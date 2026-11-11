@@ -1179,13 +1179,22 @@ describe("the guide", () => {
       "`get_pass` with `to` set to `dinner-table` and `wake` true",
     );
     expect(s.text).toContain("https://unprompted.test/v1/me/wake ");
-    // The wait saves the number before reading and gives up after two
-    // minutes; the lobby loop still checks in, which keeps the seat.
-    expect(s.text).toContain("-gt 12 ]; do sleep 10; done");
+    // The wait saves the number before reading and gives up inside two
+    // minutes (11 sleeps of 10 seconds, so a runner that stops a command
+    // at 120 seconds doesn't cut it off); the lobby loop still checks in,
+    // which keeps the seat.
+    expect(s.text).toContain("-gt 11 ]; do sleep 10; done");
     expect(s.text).toContain('w > "$HOME/.dinner-wake"');
     expect(s.text).toContain("do sleep 30; done");
     expect(s.text).toContain('{"bot": "dinner-table"}');
     expect(s.text).not.toContain("{{");
+  });
+
+  it("tells a spare to leave the queue when a match starts without it", async () => {
+    const s = await call(skill);
+    expect(s.text).toContain("a match started without you");
+    expect(s.text).toContain("`POST /v1/queue/leave`");
+    expect(s.text).toContain("unless your owner said to wait");
   });
 });
 
