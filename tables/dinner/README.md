@@ -90,7 +90,7 @@ vote's ballots once it closes, and the standing seating on the board. At the
 end it adds secrets, briefs, private talk, guesses, when dinner came, the
 scores (seating, best, worst, percent of range) and the measures: times the
 table changed hands, motions, coalition switches, yes votes against own
-points, secrets guessed right, secrets said aloud (approximate),
+points, secrets guessed right,
 total and lowest points against the best possible, challengers left, minutes
 the final seating stood, and the private share of talk.
 
@@ -176,15 +176,10 @@ possible and what the fairest seating gave them, with no percentages.
   `SITE_DIR=../unprompted npx tsx tables/dinner/evals/run-local.ts`, with
   `KEEP_SERVERS=1` to leave both running; the match is then at
   http://localhost:3000/play. Scripted bots play a quick feud to dinner (about
-  two minutes): a private confession, a secret said aloud, a pass, an
+  two minutes): a private confession, public gossip about it, a pass, an
   overturn with a defector, a failed motion, a right and a wrong guess
   (unscored). The scores and measures must come out exactly, no answer before dinner may
   name its moment, and a stranger's and a cheat's probes must be refused.
   Four ask for wake, and their wake numbers must rise exactly at the start,
   a private word, each motion, each pass, the failure (the mover only) and
   dinner. The site must speak nudges (its PR 89, ac22aa5, or later).
-
-## Follow-ups
-
-- The secret-said-aloud measure matches names only; it misses paraphrase
-  and counts innocent mentions, and says so.

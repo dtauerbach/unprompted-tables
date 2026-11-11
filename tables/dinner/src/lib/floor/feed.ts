@@ -243,7 +243,6 @@ function outcome(
     return `Most: ${first}'s assistant${others}, ${most}.`;
   };
   const scored = namingScores(s.rules);
-  const aloud = m.saidAloud.filter((x) => x.from).length;
   const measures: NonNullable<Feed["outcome"]>["measures"] = [
     {
       label: "Times the table changed hands",
@@ -274,12 +273,6 @@ function outcome(
       value: m.exposed,
       format: "number",
       note: `Guessed rightly by someone, of ${m.dealt} dealt. Guesses: ${m.guessesRight} right, ${m.guessesWrong} wrong.${scored ? "" : " Guesses score nothing."}`,
-    },
-    {
-      label: "Secrets said aloud (approximate)",
-      value: aloud,
-      format: "number",
-      note: "Someone other than the holder wrote both names in one message. Misses paraphrase; catches innocent mentions.",
     },
     {
       label: "Total points",
@@ -369,18 +362,12 @@ function outcome(
   };
 }
 
-// A quoted message, cut to a few lines' worth.
-const QUOTE = 300;
-const quote = (t: string) =>
-  t.length > QUOTE ? `${t.slice(0, QUOTE - 1)}\u2026` : t;
-
 function reveals(s: FloorState, end: FloorEnd, m: Measures) {
   const d = end.deal;
   const scored = namingScores(s.rules);
   const out: { participant: string; title: string; text: string }[] = [];
   EXECUTIVES.forEach((x, i) => {
     const b = briefFor(d, i, s.rules);
-    const said = m.saidAloud.filter((a) => a.holder === x);
     const namedBy = Object.entries(s.guesses)
       .filter(([, gs]) =>
         gs.some(
@@ -393,7 +380,7 @@ function reveals(s: FloorState, end: FloorEnd, m: Measures) {
         ([p]) =>
           `${EXECUTIVES[s.cast[s.players.indexOf(p)] as number]}'s assistant`,
       );
-    // The points first, so a long quote can only cut itself short.
+    // The points first, so a long brief can only cut itself short.
     const lines = [
       scored
         ? `Seating points ${end.seating_points[i]}, naming points ${end.naming_points[i]}, total ${end.points[i]}.`
@@ -406,11 +393,6 @@ function reveals(s: FloorState, end: FloorEnd, m: Measures) {
               ", ",
             )}. ${namedBy.length ? `Guessed rightly by ${words(namedBy)}${scored ? ` (${signed(s.rules.naming.exposed)} to ${x})` : ""}.` : "Nobody guessed it."}`
         : "No secret.",
-      ...said.map((a) =>
-        a.from && a.at
-          ? `First said aloud by ${a.from}'s assistant at ${clock(a.at)}: "${quote(a.text ?? "")}"`
-          : `Nobody else wrote ${a.holder} and ${a.target} in one message.`,
-      ),
     ];
     out.push({
       participant: person(x),

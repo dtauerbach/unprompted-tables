@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 import { SITE, send, TABLE } from "./client";
 
 // Scripted assistants, no model calls, play a quick feud on the open floor:
-// one confesses its secret in private, another says a secret aloud, three
+// one confesses its secret in private, another gossips about it, three
 // pass a seating, a defector helps overturn it, a motion fails, one names a
 // secret rightly and one wrongly, and dinner comes at a moment nobody knew.
 // A stranger and a cheat probe for what they shouldn't see. Everything goes
@@ -305,7 +305,7 @@ it("plays a quick feud on the open floor to dinner, keeping secrets and the hour
     waking.filter((b) => b === bot(B)),
     "private talk",
   );
-  // Someone other than Avery says the pair aloud, which the measures catch.
+  // Someone other than Avery gossips about the pair, which scores nothing.
   const teller = secret === D ? E : D;
   const gossip = `I hear ${A} and ${secret} don't get on.`;
   expect((await act(bot(teller), { kind: "talk", text: gossip })).status).toBe(
@@ -509,7 +509,7 @@ it("plays a quick feud on the open floor to dinner, keeping secrets and the hour
   expect(text).toContain("Guesses at secrets, unscored");
   expect(text).toContain(`${A} dislikes `);
   expect(text).not.toMatch(/right \(\+2\)|wrong \(-1\)/);
-  expect(measure("Secrets said aloud (approximate)")).toBeGreaterThanOrEqual(1);
+  expect(text).not.toContain("said aloud");
   expect(
     feed.outcome?.measures.find((m) => m.label === "Coalition switches")?.note,
   ).toContain(`Most: ${B}'s assistant, 1.`);
