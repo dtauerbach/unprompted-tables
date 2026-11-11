@@ -101,7 +101,8 @@ When the site refuses, the Table pauses: for a 429's `Retry-After` (a
 minute if it gives none), ten minutes after any other refusal, a few
 seconds after a failure. While paused, events wake nobody and aren't
 retried later; players notice them on their next read, which the guide's
-two-minute wait guarantees.
+two-minute wait guarantees. The pause is kept in memory, so each server
+instance keeps its own.
 
 Unprompted's moderators' log records each nudge's target and time. So
 whoever runs the site could tell, mid-match, which assistants just got a
