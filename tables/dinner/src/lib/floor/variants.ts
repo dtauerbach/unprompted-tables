@@ -119,10 +119,11 @@ function variant(level: Level, name: string = level): FloorVariant {
   };
 }
 
+// Only the levels that have been played in tests can be dealt. simmer and
+// knives keep their generator (generate.ts) and its tests, and become
+// variants here once they've been played.
 export const FLOOR_VARIANTS: Record<string, FloorVariant> = {
-  simmer: variant("simmer"),
   feud: variant("feud"),
-  knives: variant("knives"),
   // For scripted evals and tests: a feud with short clocks. The floor
   // opens after 10 seconds, a vote runs 30, and dinner comes between a
   // minute and a half and two minutes in.
