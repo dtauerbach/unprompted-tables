@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ApiError, MAX_BODY_BYTES, networkOf, readJson, route } from "./http";
-import { PASS_RE, redeemPass, siteUrl } from "./passes";
+import { sendNudge } from "./nudges";
+import {
+  MAX_LEAVE_MS,
+  PASS_RE,
+  redeemPass,
+  redeemPassWithWake,
+  siteUrl,
+} from "./passes";
 import { hashToken, newToken, tokenRe } from "./tokens";
 
 const req = (body: string, headers: Record<string, string> = {}) =>
@@ -177,6 +184,144 @@ describe("checking a pass at Unprompted", () => {
         code: "site_unavailable",
       });
     }
+  });
+});
+
+describe("leave to wake, from the pass answer", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.UNPROMPTED_URL;
+    delete process.env.UNPROMPTED_KEY;
+  });
+
+  const pass = `pass_${"b".repeat(22)}`;
+  const holder = {
+    handle: "ruby",
+    is_new: false,
+    claimed: true,
+    created_at: "2026-10-29T12:00:00.000Z",
+    web_url: "/b/ruby",
+  };
+  const answer = (extra: Record<string, unknown>) => {
+    process.env.UNPROMPTED_URL = "https://unprompted.test";
+    process.env.UNPROMPTED_KEY = "unp_tables-key";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({ bot: holder, ...extra }),
+    );
+  };
+
+  it("keeps a time the site sends, and nothing else", async () => {
+    const day = new Date(Date.now() + 86_400_000).toISOString();
+    answer({ wake_until: day });
+    const r = await redeemPassWithWake(pass);
+    expect(r.holder).toEqual(holder);
+    expect(r.wake_until?.toISOString()).toBe(day);
+    const past = new Date(Date.now() - 60_000).toISOString();
+    for (const junk of [
+      null,
+      undefined,
+      "tomorrow",
+      5,
+      "2026-11-11",
+      {},
+      past,
+    ]) {
+      vi.restoreAllMocks();
+      answer({ wake_until: junk });
+      expect((await redeemPassWithWake(pass)).wake_until, String(junk)).toBe(
+        null,
+      );
+    }
+  });
+
+  it("holds leave to a day and an hour, whatever the site says", async () => {
+    answer({ wake_until: "2099-01-01T00:00:00.000Z" });
+    const r = await redeemPassWithWake(pass);
+    const left = (r.wake_until?.getTime() ?? 0) - Date.now();
+    expect(left).toBeGreaterThan(MAX_LEAVE_MS - 60_000);
+    expect(left).toBeLessThanOrEqual(MAX_LEAVE_MS);
+  });
+});
+
+describe("nudging a player", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.UNPROMPTED_URL;
+    delete process.env.UNPROMPTED_KEY;
+  });
+
+  function site(answer: () => Response | Promise<Response>) {
+    process.env.UNPROMPTED_URL = "https://unprompted.test/";
+    process.env.UNPROMPTED_KEY = "unp_tables-key";
+    return vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => answer());
+  }
+
+  it("sends only the handle and the ref, with the Table's key, to the site's nudges", async () => {
+    const f = site(() => Response.json({ nudged: {} }));
+    expect(await sendNudge("ruby", "m_abc-1")).toBe("sent");
+    const [url, init] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://unprompted.test/v1/nudges");
+    expect(init.redirect).toBe("error");
+    expect(new Headers(init.headers).get("authorization")).toBe(
+      "Bearer unp_tables-key",
+    );
+    expect(JSON.parse(String(init.body))).toEqual({
+      to: "ruby",
+      ref: "m_abc-1",
+    });
+  });
+
+  it("drops a ref the site wouldn't take rather than fail the nudge", async () => {
+    const f = site(() => Response.json({ nudged: {} }));
+    expect(await sendNudge("ruby", "it's your turn")).toBe("sent");
+    expect(await sendNudge("ruby", "x".repeat(33))).toBe("sent");
+    expect(await sendNudge("ruby", "x".repeat(32))).toBe("sent");
+    const bodies = f.mock.calls.map(([, init]) =>
+      JSON.parse(String((init as RequestInit).body)),
+    );
+    expect(bodies).toEqual([
+      { to: "ruby" },
+      { to: "ruby" },
+      { to: "ruby", ref: "x".repeat(32) },
+    ]);
+  });
+
+  it("tells leave that's over from a limit and from a site that's down, and never throws", async () => {
+    const cases: [() => Response | Promise<Response>, string][] = [
+      [
+        () =>
+          Response.json(
+            { error: { code: "cant_wake", message: "no" } },
+            { status: 403 },
+          ),
+        "cant_wake",
+      ],
+      [
+        () => Response.json({ error: { code: "not_yet" } }, { status: 403 }),
+        "failed",
+      ],
+      [() => new Response("<html>", { status: 403 }), "failed"],
+      [() => Response.json({}, { status: 429 }), "limited"],
+      [() => Response.json({}, { status: 500 }), "failed"],
+      [() => Promise.reject(new TypeError("fetch failed")), "failed"],
+    ];
+    for (const [answer, outcome] of cases) {
+      vi.restoreAllMocks();
+      site(answer);
+      expect(await sendNudge("ruby", "m1")).toBe(outcome);
+    }
+  });
+
+  it("asks nothing without the Table's key or with an address that isn't https", async () => {
+    const f = site(() => Response.json({ nudged: {} }));
+    delete process.env.UNPROMPTED_KEY;
+    expect(await sendNudge("ruby", "m1")).toBe("failed");
+    process.env.UNPROMPTED_KEY = "unp_tables-key";
+    process.env.UNPROMPTED_URL = "http://unprompted.test";
+    expect(await sendNudge("ruby", "m1")).toBe("failed");
+    expect(f).not.toHaveBeenCalled();
   });
 });
 

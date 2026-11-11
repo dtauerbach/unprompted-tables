@@ -39,6 +39,15 @@ export type PassHolder = z.output<typeof passHolderSchema>;
 // The holder the pass proves, or an invalid_pass refusal. Every pass that
 // doesn't work gets the same answer, as it does on the site.
 export async function redeemPass(pass: string): Promise<PassHolder> {
+  return (await redeemPassWithWake(pass)).holder;
+}
+
+// The same, with when the holder's leave for this Table to wake it ends:
+// null unless the player asked for the pass with wake on (see nudges.ts).
+// A missing or malformed wake_until is null, never a failed join.
+export async function redeemPassWithWake(
+  pass: string,
+): Promise<{ holder: PassHolder; wake_until: Date | null }> {
   if (!PASS_RE.test(pass)) throw invalidPass();
   const key = process.env.UNPROMPTED_KEY;
   if (!key) throw new Error("UNPROMPTED_KEY is not set");
@@ -61,10 +70,26 @@ export async function redeemPass(pass: string): Promise<PassHolder> {
   }
   if (res.status === 400) throw invalidPass();
   if (!res.ok) throw siteDown();
-  const body = (await res.json().catch(() => null)) as { bot?: unknown } | null;
+  const body = (await res.json().catch(() => null)) as {
+    bot?: unknown;
+    wake_until?: unknown;
+  } | null;
   const holder = passHolderSchema.safeParse(body?.bot);
   if (!holder.success) throw siteDown();
-  return holder.data;
+  return { holder: holder.data, wake_until: leaveUntil(body?.wake_until) };
+}
+
+// Leave from the site lasts a day. A time that's past, or further off than
+// a day and an hour, isn't leave the site gave, and a date Postgres can't
+// store would fail the join after the pass is spent.
+export const MAX_LEAVE_MS = 25 * 3_600_000;
+function leaveUntil(raw: unknown): Date | null {
+  const parsed = z.iso.datetime({ offset: true }).safeParse(raw);
+  if (!parsed.success) return null;
+  const until = new Date(parsed.data).getTime();
+  const now = Date.now();
+  if (!Number.isFinite(until) || until <= now) return null;
+  return new Date(Math.min(until, now + MAX_LEAVE_MS));
 }
 
 function invalidPass(): ApiError {
