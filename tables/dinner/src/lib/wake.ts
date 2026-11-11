@@ -271,12 +271,14 @@ async function committed(
 }
 
 // Not woken, so not waiting: the next event tries again. Only the mark the
-// job went with. One row at a time, so it never holds one row while waiting
-// on another that a move holds, and as an upsert, which waits for a write
-// still open (one that inserted the row too) and then sees what it wrote,
-// where a plain UPDATE would skip a row it can't yet see as waiting. With a
-// lock timeout, so a write open for long can't hold the job; a mark left
-// behind goes stale on its own.
+// job went with, and never a row that isn't there: it inserts nothing. One
+// row at a time, so it never holds one row while waiting on another that a
+// move holds. It locks the row first, which waits for a write still open
+// that marked it, and then checks the mark in a statement of its own, which
+// sees what that write committed (a plain UPDATE would skip a row it can't
+// yet see as waiting). With a lock timeout, so a write open for long can't
+// hold the job; a mark left behind, or one on a row the open write
+// inserted, goes stale on its own.
 async function unmark(match: string, marks: Mark[]): Promise<void> {
   for (const m of marks) {
     try {
@@ -285,10 +287,12 @@ async function unmark(match: string, marks: Mark[]): Promise<void> {
           `SET LOCAL lock_timeout = ${Math.max(1, Math.floor(WAKE_TIMING.lockTimeoutMs))}`,
         );
         await tx`
-          INSERT INTO match_reads (match_id, player, waiting, nudges)
-          VALUES (${match}, ${m.player}, false, ${m.nudges})
-          ON CONFLICT (match_id, player) DO UPDATE SET waiting = false
-          WHERE match_reads.waiting AND match_reads.nudges = EXCLUDED.nudges`;
+          SELECT 1 FROM match_reads
+          WHERE match_id = ${match} AND player = ${m.player} FOR UPDATE`;
+        await tx`
+          UPDATE match_reads SET waiting = false
+          WHERE match_id = ${match} AND player = ${m.player}
+            AND waiting AND nudges = ${m.nudges}`;
       });
     } catch (e) {
       logFailure(e, "nudge_unmark", match);
@@ -302,9 +306,10 @@ type Counted = Mark & { buckets: string[] };
 // after the write. Every bucket the marks need is locked in one statement,
 // in sorted order, so two jobs never wait on each other in a cycle, and no
 // lock is held across the Table beyond these rows for these few statements.
-// Game wakes come first. The first nudge over a budget in an hour is logged
-// (the bucket is set one past its limit to remember that), so a Table that
-// stops waking players says why.
+// Game wakes come first. The first nudge over a budget in an hour is logged,
+// so a Table that stops waking players says why; that it was logged is kept
+// in a row of its own (nudge:logged:<bucket>), so the bucket's count stays a
+// true count and a refund gives back a real slot.
 async function count(
   match: string,
   marks: Mark[],
@@ -336,6 +341,7 @@ async function count(
     const before = new Map(counts);
     const sent: Counted[] = [];
     const over: Mark[] = [];
+    const spent = new Map<string, string>();
     for (const { m, buckets } of plan) {
       const full = buckets.filter((b) => (counts.get(b.name) ?? 0) >= b.limit);
       if (full.length === 0) {
@@ -344,12 +350,25 @@ async function count(
         sent.push({ ...m, buckets: buckets.map((b) => b.name) });
         continue;
       }
-      for (const b of full)
-        if (counts.get(b.name) === b.limit) {
-          counts.set(b.name, b.limit + 1);
-          logFailure(new Error("nudge budget spent"), b.log, match);
-        }
+      for (const b of full) spent.set(b.name, b.log);
       over.push(m);
+    }
+    // Only one job at a time holds a bucket's row, so only one can find its
+    // flag missing; the flags are taken in sorted order all the same.
+    if (spent.size > 0) {
+      const flags = [...spent.keys()].sort().map((n) => `nudge:logged:${n}`);
+      const fresh = await tx<{ bucket: string }[]>`
+        INSERT INTO rate_limits (bucket, window_start, count)
+        SELECT b, ${rows[0]?.window_start ?? null}, 1
+        FROM unnest(${flags}::text[]) AS b ORDER BY b
+        ON CONFLICT (bucket, window_start) DO NOTHING
+        RETURNING bucket`;
+      for (const { bucket } of fresh)
+        logFailure(
+          new Error("nudge budget spent"),
+          spent.get(bucket.slice("nudge:logged:".length)) ?? "nudge_budget",
+          match,
+        );
     }
     const changed = names.filter((n) => counts.get(n) !== before.get(n));
     const window = rows[0]?.window_start ?? null;

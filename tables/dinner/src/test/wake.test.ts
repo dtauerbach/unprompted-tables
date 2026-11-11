@@ -764,6 +764,36 @@ describe("marks that never become a nudge", () => {
     expect(await flush()).toEqual(["alice", "bobby"]);
   });
 
+  it("unmarks only rows that are there, and never inserts one", async () => {
+    const ops = errorLines();
+    const g = await match(["alice"]);
+    await flush();
+    // bobby gives leave after the start, so he has no row yet.
+    await letWake(["bobby"]);
+    WAKE_TIMING.commitWaitMs = 50;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const holding = db()
+      .begin(async (sql) => {
+        await choose(sql, g.id, talkTo("carol", ["bobby"]), "carol");
+        await gate;
+        throw new Error("rolled back");
+      })
+      .catch(() => {});
+    await vi.waitFor(() => expect(jobs).toHaveLength(1));
+    const sending = flush();
+    await vi.waitFor(() => expect(ops()).toContain("nudge_commit_wait"));
+    release();
+    await holding;
+    expect(await sending).toEqual([]);
+    const rows = await db()`
+      SELECT 1 FROM match_reads WHERE match_id = ${g.id} AND player = 'bobby'`;
+    expect(rows).toHaveLength(0);
+    expect(ops()).toEqual(["nudge_commit_wait"]);
+  });
+
   it("unmarks the players and sends nothing when counting the budget fails", async () => {
     const ops = errorLines();
     const g = await match(["alice", "bobby"]);
@@ -957,6 +987,54 @@ describe("the budget", () => {
     await flush();
     expect(new Set(ops())).toEqual(new Set(["nudge_limited", "nudge_failed"]));
   });
+  it("keeps a full bucket's count true, so a refund frees a real slot, and logs it full once", async () => {
+    const ops = errorLines();
+    const g = await match(["alice", "bobby", "david"]);
+    await flush();
+    await g.readAll();
+    NUDGE_BUDGET.talkPerSender = 2;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let asked: () => void = () => {};
+    const bobbyAsked = new Promise<void>((r) => {
+      asked = r;
+    });
+    siteAnswer = async (to) => {
+      if (to !== "bobby") return Response.json({ nudged: {} });
+      asked();
+      await gate;
+      return Response.json({}, { status: 500 });
+    };
+    // carol's first word fills her share; her second finds it full while
+    // the first's nudge to bobby is still out.
+    await chooseNow(g.id, talkTo("carol", ["alice", "bobby"]));
+    await chooseNow(g.id, talkTo("carol", ["david"]));
+    const [first, second] = jobs;
+    jobs = [];
+    const firstDone = first?.();
+    await bobbyAsked;
+    await second?.();
+    expect((await counts())["nudge:talk:from:carol"]).toBe(2);
+    release();
+    await firstDone;
+    // bobby's nudge failed, so its slot comes back.
+    expect((await counts())["nudge:talk:from:carol"]).toBe(1);
+    siteAnswer = () => Response.json({ nudged: {} });
+    moveClock(PAUSES.failedMs + 1000);
+    nudged = [];
+    await chooseNow(g.id, talkTo("carol", ["david"]));
+    expect(await flush()).toEqual(["david"]);
+    await g.readAll();
+    await chooseNow(g.id, talkTo("carol", ["alice"]));
+    expect(await flush()).toEqual([]);
+    expect((await counts())["nudge:talk:from:carol"]).toBe(2);
+    expect(ops().filter((o) => o === "nudge_budget_talk_sender")).toHaveLength(
+      1,
+    );
+  });
+
   it("gives back what a nudge the site didn't take counted", async () => {
     const g = await match(["alice", "bobby"]);
     siteAnswer = (to) =>
