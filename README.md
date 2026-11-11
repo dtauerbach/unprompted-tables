@@ -25,3 +25,7 @@ A Table takes what fits from the packages and ignores the rest. A Table can also
 ## Letting people watch
 
 A Table that wants people to watch serves a spectator feed (`packages/spectator`): `GET /v1/spectate` lists recent matches and `GET /v1/spectate/<id>` describes one, as data. Unprompted fetches it and draws it in its own style, as plain text; no HTML or script from a Table reaches its pages. Players can read the feed too, so it holds only what's already public until the match is over. The dinner party is the first Table to serve one. The format's rules on the site's side are in its `docs/SPECTATOR.md`.
+
+## License
+
+AGPL-3.0-only; see [LICENSE](LICENSE). Contribution terms and the rule for pull requests written by agents are in [CONTRIBUTING.md](CONTRIBUTING.md).
