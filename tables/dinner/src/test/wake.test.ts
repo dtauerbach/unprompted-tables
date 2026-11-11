@@ -1,10 +1,11 @@
 import { db } from "@unprompted-tables/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// The executive game with short clocks (0, 60 and 30 seconds), set before
-// any module reads it.
+// The open floor with short clocks (the floor opens after 10 seconds, a
+// vote runs 30, and dinner comes between 90 and 120), set before any
+// module reads it.
 vi.hoisted(() => {
-  process.env.DINNER_VARIANT = "quick-compromise";
+  process.env.DINNER_VARIANT = "quick-feud";
 });
 
 import { GET as skill } from "@/app/skill.md/route";
@@ -15,6 +16,8 @@ import { POST as queue } from "@/app/v1/queue/route";
 import { moveClock } from "@/lib/clock";
 import { EXECUTIVES, start as startExec } from "@/lib/exec/game";
 import { EXEC_VARIANTS } from "@/lib/exec/variants";
+import { start as startFloor } from "@/lib/floor/game";
+import { FLOOR_VARIANTS } from "@/lib/floor/variants";
 import { start as startParty } from "@/lib/match";
 import type { AnyEvent } from "@/lib/rules";
 import { sweep } from "@/lib/store";
@@ -34,8 +37,8 @@ import { call, fakeSite, holderOf, join, resetDb, sessionFor } from "./helpers";
 
 // A player that asked Unprompted for its pass with wake on lets this Table
 // raise its wake number when its match needs it: at the start, at each
-// filing (the voters), at each close and the end (everyone), and for
-// private talk to it. Never for its own move, never twice before it reads
+// motion (the voters), at each vote that passes (everyone) or fails (its
+// mover), at the end (everyone), and for private talk to it. Never for its own move, never twice before it reads
 // the match again, never once its leave is over, and within a budget no
 // one player can spend.
 
@@ -104,6 +107,8 @@ async function match(
   await beforeStart();
   for (const s of tokens) await call(queue, { session: s, method: "POST" });
   const id = (await call(me, { session: tokens[0] })).body.match as string;
+  // The floor opens; nothing happens to the match for it.
+  moveClock(10_000);
   const seat = (h: string) => tokens[players.indexOf(h)] as string;
   // A watcher's look: no session, so it marks nobody as having read.
   const look = async () => (await call(getMatch, { params: { id } })).body;
@@ -116,7 +121,6 @@ async function match(
       ],
     ),
   );
-  const byExec = new Map([...execOf].map(([h, x]) => [x, h]));
   const read = (h: string) =>
     call(getMatch, { params: { id }, session: seat(h) });
   const readAll = async (...but: string[]) => {
@@ -130,13 +134,13 @@ async function match(
       text,
       ...(to ? { to: to.map((x) => execOf.get(x)) } : {}),
     });
-  const proposer = async () =>
-    byExec.get((await look()).round.proposer) as string;
-  const file = (h: string, round = 1) =>
-    act(h, { kind: "propose", round, seating: EXECUTIVES });
-  const vote = (h: string, ballot: "yes" | "no", round = 1) =>
-    act(h, { kind: "vote", round, ballot });
-  return { id, seat, look, read, readAll, act, talk, proposer, file, vote };
+  // Anyone may move a seating; these tests have the first player do it.
+  const mover = players[0] as string;
+  const move = (h: string, seating: string[] = EXECUTIVES) =>
+    act(h, { kind: "motion", seating });
+  const vote = (h: string, ballot: "yes" | "no", motion = 1) =>
+    act(h, { kind: "vote", motion, ballot });
+  return { id, seat, look, read, readAll, act, talk, mover, move, vote };
 }
 
 // Chooses whom to wake in a write of the test's own, which commits.
@@ -168,21 +172,110 @@ describe("who an event wakes", () => {
   const ev = (body: Record<string, unknown>, audience: unknown = "public") =>
     ({ body: { at: at.toISOString(), ...body }, audience }) as AnyEvent;
 
-  it("wakes everyone for the start, a round, and the end", () => {
-    expect(wakesFor(handles, execStart, true).game.sort()).toEqual(handles);
+  it("wakes everyone for the open floor's start and end", () => {
+    const floor = startFloor(
+      handles,
+      FLOOR_VARIANTS.feud as NonNullable<typeof FLOOR_VARIANTS.feud>,
+      at,
+      "wakes",
+    ) as AnyEvent[];
+    expect(wakesFor(handles, floor, "floor").game.sort()).toEqual(handles);
+    expect(
+      wakesFor(
+        handles,
+        [ev({ kind: "end", how: "no_deal" })],
+        "floor",
+      ).game.sort(),
+    ).toEqual(handles);
+  });
+
+  it("wakes the voters for a motion, everyone for a pass, and the mover for a failure", () => {
+    const moved = wakesFor(
+      handles,
+      [
+        ev({
+          kind: "propose",
+          player: "carol",
+          motion: 1,
+          seating: EXECUTIVES,
+        }),
+      ],
+      "floor",
+    );
+    expect(moved.game.sort()).toEqual(all("carol"));
+    const close = (passed: boolean, by: string) =>
+      ev({
+        kind: "motion",
+        motion: 1,
+        player: "carol",
+        seating: EXECUTIVES,
+        ballots: {},
+        yes: passed ? 3 : 1,
+        no: passed ? 0 : 3,
+        passed,
+        by,
+      });
+    expect(
+      wakesFor(handles, [close(true, "yes")], "floor").game.sort(),
+    ).toEqual(handles);
+    for (const by of ["no", "time"])
+      expect(wakesFor(handles, [close(false, by)], "floor").game).toEqual([
+        "carol",
+      ]);
+  });
+
+  it("wakes nobody on the open floor for a ballot, a guess or public talk", () => {
+    const quiet = wakesFor(
+      handles,
+      [
+        ev({ kind: "back", player: "bobby", motion: 1, ballot: "no" }, [
+          "bobby",
+        ]),
+        ev(
+          {
+            kind: "name",
+            player: "bobby",
+            executive: "Avery",
+            dislikes: "Blake",
+          },
+          ["bobby"],
+        ),
+        ev({ kind: "talk", player: "bobby", text: "hi" }),
+      ],
+      "floor",
+    );
+    expect(quiet.game).toEqual([]);
+    expect(quiet.talk.size).toBe(0);
+    const psst = wakesFor(
+      handles,
+      [
+        ev({ kind: "talk", player: "bobby", text: "psst", to: ["X"] }, [
+          "bobby",
+          "carol",
+        ]),
+      ],
+      "floor",
+    );
+    expect([...psst.talk]).toEqual([["bobby", ["carol"]]]);
+  });
+
+  it("wakes everyone for the three-round game's start, a round, and the end", () => {
+    expect(wakesFor(handles, execStart, "exec").game.sort()).toEqual(handles);
     for (const body of [
       { kind: "round", phase: "open", round: 2, proposer: "Avery" },
       { kind: "round", phase: "close", round: 1, seating: null },
       { kind: "end", how: "deal" },
     ])
-      expect(wakesFor(handles, [ev(body)], true).game.sort()).toEqual(handles);
+      expect(wakesFor(handles, [ev(body)], "exec").game.sort()).toEqual(
+        handles,
+      );
   });
 
-  it("wakes the voters for a filing, and nobody for a ballot or public talk", () => {
+  it("wakes the voters for a three-round filing, and nobody for a ballot or public talk", () => {
     const filed = wakesFor(
       handles,
       [ev({ kind: "propose", player: "carol", round: 1, seating: EXECUTIVES })],
-      true,
+      "exec",
     );
     expect(filed.game.sort()).toEqual(all("carol"));
     const quiet = wakesFor(
@@ -193,7 +286,7 @@ describe("who an event wakes", () => {
         ]),
         ev({ kind: "talk", player: "bobby", text: "hi" }),
       ],
-      true,
+      "exec",
     );
     expect(quiet.game).toEqual([]);
     expect(quiet.talk.size).toBe(0);
@@ -213,7 +306,7 @@ describe("who an event wakes", () => {
           "david",
         ]),
       ],
-      true,
+      "exec",
     );
     expect(w.game).toEqual([]);
     expect([...w.talk]).toEqual([["bobby", ["carol", "ellen", "david"]]]);
@@ -226,7 +319,7 @@ describe("who an event wakes", () => {
       at,
       "party",
     ) as AnyEvent[];
-    expect(wakesFor(handles, events, false).game.sort()).toEqual(handles);
+    expect(wakesFor(handles, events, "party").game.sort()).toEqual(handles);
     const moves = wakesFor(
       handles,
       [
@@ -234,7 +327,7 @@ describe("who an event wakes", () => {
         ev({ kind: "propose", player: "alice", id: "P1", seating: [] }),
         ev({ kind: "back", player: "bobby", proposal: "P1" }),
       ],
-      false,
+      "party",
     );
     expect(moves.game).toEqual([]);
     expect(moves.talk.size).toBe(0);
@@ -245,7 +338,6 @@ describe("waking players through a match", () => {
   it("wakes every assistant with leave once when the match starts, with the match id", async () => {
     const g = await match(["alice", "bobby", "carol"]);
     expect(g.id).toMatch(/^m_/);
-    // Once each: the first round's opening comes with the start.
     expect(await flush()).toEqual(["alice", "bobby", "carol"]);
   });
 
@@ -260,84 +352,87 @@ describe("waking players through a match", () => {
     expect(nudged).toEqual([{ to: "alice", ref: g.id }]);
   });
 
-  it("wakes the four voters when the seating is filed, never the proposer", async () => {
+  it("wakes the four voters when a seating is moved, never the mover", async () => {
     const g = await match();
     await flush();
     await g.readAll();
-    const p = await g.proposer();
-    expect((await g.file(p)).status).toBe(200);
-    expect(await flush()).toEqual(all(p));
+    expect((await g.move(g.mover)).status).toBe(200);
+    expect(await flush()).toEqual(all(g.mover));
   });
 
-  it("wakes nobody for a ballot that doesn't close the round, or for public talk", async () => {
+  it("wakes nobody for a ballot that doesn't close the vote, a guess, or public talk", async () => {
     const g = await match();
     await flush();
     await g.readAll();
-    const p = await g.proposer();
-    await g.file(p);
+    await g.move(g.mover);
     await flush();
     await g.readAll();
-    const [v1] = all(p) as [string];
+    const [v1] = all(g.mover) as [string];
     expect((await g.vote(v1, "yes")).status).toBe(200);
     expect((await g.talk(v1, "to the table")).status).toBe(200);
+    const mine = (await g.read(v1)).body.you.executive as string;
+    const [x, y] = EXECUTIVES.filter((e) => e !== mine) as [string, string];
+    expect(
+      (await g.act(v1, { kind: "name", executive: x, dislikes: y })).status,
+    ).toBe(200);
     expect(await flush()).toEqual([]);
   });
 
-  it("wakes everyone but the last voter when the fourth ballot closes the round", async () => {
+  it("wakes only the mover when the third no fails the motion", async () => {
     const g = await match();
     await flush();
     await g.readAll();
-    const p = await g.proposer();
-    await g.file(p);
+    await g.move(g.mover);
     await flush();
-    const voters = all(p);
-    for (const v of voters.slice(0, 3)) await g.vote(v, "yes");
+    const voters = all(g.mover);
+    for (const v of voters.slice(0, 2)) await g.vote(v, "no");
     await g.readAll();
     await flush();
-    const last = voters[3] as string;
-    // A no under unanimity: the round fails and the next opens.
+    const last = voters[2] as string;
     const closed = await g.vote(last, "no");
-    expect(closed.body.rounds).toHaveLength(1);
-    expect(closed.body.round.number).toBe(2);
-    expect(await flush()).toEqual(all(last));
+    expect(closed.body.motions[0]).toMatchObject({
+      status: "failed",
+      closed_by: "no",
+    });
+    expect(await flush()).toEqual([g.mover]);
   });
 
-  it("wakes everyone but the last voter when a seating passes and the match ends", async () => {
+  it("wakes everyone but the last voter when a seating passes", async () => {
     const g = await match();
     await flush();
     await g.readAll();
-    const p = await g.proposer();
-    await g.file(p);
-    const voters = all(p);
-    for (const v of voters.slice(0, 3)) await g.vote(v, "yes");
+    await g.move(g.mover);
+    const voters = all(g.mover);
+    await g.vote(voters[0] as string, "yes");
     await g.readAll();
     await flush();
-    const last = voters[3] as string;
-    expect((await g.vote(last, "yes")).body.phase).toBe("over");
+    const last = voters[1] as string;
+    const passed = await g.vote(last, "yes");
+    expect(passed.body.standing.motion).toBe(1);
+    expect(passed.body.phase).not.toBe("over");
     expect(await flush()).toEqual(all(last));
   });
 
-  it("wakes everyone but the reader when a read finds voting time run out", async () => {
+  it("wakes the mover when a read finds voting time run out", async () => {
     const g = await match();
     await flush();
     await g.readAll();
-    const p = await g.proposer();
-    await g.file(p);
+    await g.move(g.mover);
     await flush();
     await g.readAll();
     moveClock(31_000);
     const seen = await g.read("david");
-    expect(seen.body.rounds).toHaveLength(1);
-    expect(await flush()).toEqual(all("david"));
+    expect(seen.body.motions[0]).toMatchObject({ closed_by: "time" });
+    expect(await flush()).toEqual([g.mover]);
   });
 
-  it("wakes everyone when the sweep closes a round nobody filed in", async () => {
+  it("wakes everyone when the sweep finds dinner served", async () => {
     const g = await match();
     await flush();
     await g.readAll();
-    moveClock(61_000);
+    moveClock(111_000);
     await sweep();
-    expect((await g.look()).round.number).toBe(2);
+    expect((await g.look()).phase).toBe("over");
     expect(await flush()).toEqual(handles);
   });
 
@@ -381,12 +476,22 @@ describe("waking players through a match", () => {
     const g = await match();
     await flush();
     await g.readAll();
-    const p = await g.proposer();
-    const voter = all(p)[0] as string;
+    const voter = all(g.mover)[0] as string;
     const bad = await g.vote(voter, "yes");
     expect(bad.status).toBe(409);
-    const wrong = await g.file(voter);
-    expect(wrong.status).toBe(409);
+    expect(bad.body.error.code).toBe("no_such_motion");
+    await g.move(voter);
+    await flush();
+    await g.readAll();
+    const twice = await g.move(voter, [
+      "Blake",
+      "Avery",
+      "Casey",
+      "Devon",
+      "Emery",
+    ]);
+    expect(twice.status).toBe(409);
+    expect(twice.body.error.code).toBe("motion_open");
     expect(await flush()).toEqual([]);
   });
 
@@ -414,8 +519,7 @@ describe("waking players through a match", () => {
         ? Response.json({}, { status: 429 })
         : Response.json({}, { status: 500 });
     await flush();
-    const p = await g.proposer();
-    expect((await g.file(p)).status).toBe(200);
+    expect((await g.move(g.mover)).status).toBe(200);
     expect((await g.talk("carol", "still here")).status).toBe(200);
     // A limited or failed nudge keeps the leave.
     const rows = await db()<{ player: string }[]>`
@@ -488,10 +592,9 @@ describe("when nudges go wrong", () => {
     await g.talk("david", "two", ["alice", "ellen"]);
     expect(await flush()).toEqual([]);
     moveClock(PAUSES.limitedMs + 1000);
-    // A minute on, filing time has run out too, so ellen's talk closes the
-    // round and wakes everyone but her and carol, who was woken and hasn't
-    // read. bobby, never woken, is woken now.
-    await g.talk("ellen", "three", ["alice", "bobby", "carol"]);
+    // A minute on, ellen's motion wakes everyone but her and carol, who was
+    // woken and hasn't read. bobby, never woken, is woken now.
+    await g.move("ellen");
     expect(await flush()).toEqual(["alice", "bobby", "david"]);
   });
 
@@ -647,13 +750,13 @@ describe("wake bookkeeping never holds up a move", () => {
       expect(g.id).toMatch(/^m_/);
       expect((await g.read("bobby")).status).toBe(200);
       expect((await g.talk("alice", "still on", ["bobby"])).status).toBe(200);
-      expect((await g.file(await g.proposer())).status).toBe(200);
+      expect((await g.move(g.mover)).status).toBe(200);
       moveClock(31_000);
       await sweep();
-      expect((await g.look()).round.number).toBe(2);
+      expect((await g.look()).motions[0].status).toBe("failed");
       expect(jobs).toHaveLength(0);
       expect(new Set(ops())).toEqual(new Set(["wake_mark"]));
-      // The start, the talk, the filing, and the sweep's close.
+      // The start, the talk, the motion, and the sweep's close.
       expect(ops().length).toBe(4);
     } finally {
       await db()`ALTER TABLE wake_leave_away RENAME TO wake_leave`;
@@ -825,11 +928,11 @@ describe("the budget", () => {
     const g = await match();
     await flush();
     await g.readAll();
-    const p = await g.proposer();
-    await g.file(p);
+    const p = g.mover;
+    await g.move(p);
     await flush();
     const c = await counts();
-    // The start woke all but the joiner; the filing, all but the proposer.
+    // The start woke all but the joiner; the motion, all but the mover.
     expect(c["nudge:match:M"]).toBe(8);
     expect(c["nudge:all"]).toBe(8);
     for (const h of handles)
@@ -890,31 +993,31 @@ describe("the budget", () => {
     await flush();
     await g.readAll();
     // Start: one each. Talk may add two to a player; four in all leaves one
-    // for the filing.
+    // for the motion.
     NUDGE_BUDGET.talkPerPlayer = 2;
     NUDGE_BUDGET.perPlayer = 4;
-    const p = await g.proposer();
+    const p = g.mover;
     const victim = all(p)[0] as string;
     for (const t of all(victim)) {
       await g.talk(t, "psst", [victim]);
       await g.read(victim);
     }
     expect(await flush()).toEqual([victim, victim]);
-    await g.file(p);
+    await g.move(p);
     expect(await flush()).toContain(victim);
   });
 
-  it("leaves room for the others' round wakes when one player tries to spend the Table's hour", async () => {
+  it("leaves room for the others' game wakes when one player tries to spend the Table's hour", async () => {
     const g = await match();
     await flush();
     await g.readAll();
-    // Start: 4. A round's filing and close: 8 more. Talk gets 4 of the
-    // Table's 16, however much it tries.
+    // Start: 4. A motion and its pass: 8 more. Talk gets 4 of the Table's
+    // 16, however much it tries.
     NUDGE_BUDGET.perTable = 16;
     NUDGE_BUDGET.talkPerTable = 4;
     NUDGE_BUDGET.talkPerSender = 100;
     NUDGE_BUDGET.talkPerPlayer = 100;
-    const p = await g.proposer();
+    const p = g.mover;
     const griefer = all(p)[0] as string;
     let woken = 0;
     for (let i = 0; i < 10; i++) {
@@ -923,13 +1026,13 @@ describe("the budget", () => {
       await g.readAll(griefer);
     }
     expect(woken).toBe(4);
-    await g.file(p);
+    await g.move(p);
     expect(await flush()).toEqual(all(p));
     await g.readAll();
     const voters = all(p);
-    for (const v of voters.slice(0, 3)) await g.vote(v, "yes");
-    const last = voters[3] as string;
-    await g.vote(last, "no");
+    await g.vote(voters[0] as string, "yes");
+    const last = voters[1] as string;
+    await g.vote(last, "yes");
     expect(await flush()).toEqual(all(last));
   });
 
@@ -942,7 +1045,7 @@ describe("the budget", () => {
     const g = await match();
     expect(await flush()).toEqual(all(joiner));
     await g.readAll();
-    await g.file(await g.proposer());
+    await g.move(g.mover);
     expect(await flush()).toEqual([]);
     expect(lines.map((l) => JSON.parse(l).operation)).toEqual([
       "nudge_budget_match",

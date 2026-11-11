@@ -7,7 +7,7 @@ import {
 import { after } from "next/server";
 import { now } from "./clock";
 import { logFailure } from "./diagnostics";
-import type { AnyEvent } from "./rules";
+import type { AnyEvent, GameKind } from "./rules";
 
 // Waking players through Unprompted. A player that asked for its pass with
 // wake on (wake_leave) is nudged when its match needs it, so it waits on its
@@ -22,19 +22,26 @@ import type { AnyEvent } from "./rules";
 // limiting, and players still read the match on their own clock.
 
 // Who an event wakes. Game wakes come from the match's structure, so a
-// match makes a bounded number of them: the start, each round's opening
-// (which always comes with the start or the last round's close, so waking
-// everyone for it costs nothing more), each filing (the four voters), and
-// each close and the end (everyone). A ballot is sealed and public talk is
-// read on the player's own clock, so neither wakes anyone. Private talk
-// wakes its recipients, out of a smaller, capped share of the budget.
-// The first game, the free-form party, wakes everyone at its start and end.
+// match makes a bounded number of them.
+// - The open floor: the start and the end wake everyone. A motion wakes the
+//   four who may vote on it. A vote that passes changes the standing
+//   seating, so it wakes everyone; one that fails changes nothing but its
+//   mover's freedom to move again, so it wakes only the mover. A ballot and
+//   a guess are sealed, and public talk is read on the player's own clock,
+//   so none of them wakes anyone.
+// - The three-round game: the start, each round's opening (which always
+//   comes with the start or the last round's close, so waking everyone for
+//   it costs nothing more), each filing (the four voters), and each close
+//   and the end (everyone).
+// - The first game, the free-form party: everyone at its start and end.
+// In every game private talk wakes its recipients, out of a smaller,
+// capped share of the budget.
 export type Wakes = { game: string[]; talk: Map<string, string[]> };
 
 export function wakesFor(
   players: readonly string[],
   events: readonly AnyEvent[],
-  exec: boolean,
+  kind: GameKind,
 ): Wakes {
   const game = new Set<string>();
   const talk = new Map<string, Set<string>>();
@@ -42,8 +49,11 @@ export function wakesFor(
     const b = e.body;
     if (b.kind === "start" || b.kind === "end" || b.kind === "round") {
       for (const p of players) game.add(p);
-    } else if (b.kind === "propose" && exec) {
+    } else if (b.kind === "propose" && kind !== "party") {
       for (const p of players) if (p !== b.player) game.add(p);
+    } else if (b.kind === "motion" && kind === "floor") {
+      if (b.passed) for (const p of players) game.add(p);
+      else game.add(b.player);
     } else if (b.kind === "talk" && Array.isArray(e.audience)) {
       const to = talk.get(b.player) ?? new Set<string>();
       for (const p of e.audience) if (p !== b.player) to.add(p);
@@ -59,10 +69,16 @@ export function wakesFor(
 // The Table's own hourly budget, below Unprompted's public limits (1200
 // nudges an hour per Table, 120 to one bot), so the Table never runs into
 // the site's. No one party can spend it all:
-// - Game wakes are counted per match (a six-round match makes at most 59),
-//   never against the player whose move set them off.
-// - Each player takes at most perPlayer an hour (a match needs about 14),
-//   which bounds what a ring of colluding bots can draw.
+// - Game wakes are counted per match, never against the player whose move
+//   set them off. A typical open-floor match (eight motions, four passing)
+//   makes about 66: the start's 5, the motions' 32, the passes' 20, the
+//   failures' 4 and the end's 5. 100 is that and half again, room for a
+//   busier match (twelve motions, seven passing, about 90). Fifteen motions
+//   all passing would ask for about 130, but a player is woken once until
+//   it reads the match again, so a burst of motions costs each player one
+//   wake, not one a motion; and the cap only ever drops wakes, never a move.
+// - Each player takes at most perPlayer an hour (a floor match needs about
+//   16), which bounds what a ring of colluding bots can draw.
 // - Talk wakes are counted against the talker, against each recipient's
 //   talk share, and against a talk share of the Table, so however much
 //   anyone talks, most of the Table's hour and of each player's hour stays
@@ -72,7 +88,7 @@ export function wakesFor(
 export const NUDGE_BUDGET = {
   perTable: 1000,
   perPlayer: 40,
-  perMatch: 80,
+  perMatch: 100,
   talkPerTable: 400,
   talkPerSender: 30,
   talkPerPlayer: 20,

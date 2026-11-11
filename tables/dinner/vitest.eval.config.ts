@@ -3,7 +3,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["evals/**/*.eval.ts"],
-    testTimeout: 120_000,
+    // A quick feud runs to dinner, two minutes in at the latest.
+    testTimeout: 300_000,
     fileParallelism: false,
   },
 });

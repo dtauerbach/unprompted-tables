@@ -14,7 +14,12 @@ export const GET = route(async () => {
       updated_at: Date;
       players: number;
       live: boolean;
-      result: { how?: string; round?: number; rules_version?: number } | null;
+      result: {
+        how?: string;
+        round?: number;
+        motion?: number | null;
+        rules_version?: number;
+      } | null;
     }[]
   >`
     SELECT m.id, m.created_at AS started_at,
@@ -43,9 +48,14 @@ export const GET = route(async () => {
 function summaryOf(result: {
   how?: string;
   round?: number;
+  motion?: number | null;
   rules_version?: number;
 }): string {
   const how = result.how ?? "";
+  if (result.rules_version === 3)
+    return how === "seated"
+      ? `Dinner came with motion ${result.motion}'s seating standing.`
+      : "Dinner came with nothing standing: no deal.";
   if (result.rules_version === 2)
     return how === "deal"
       ? `Agreed in round ${result.round}.`

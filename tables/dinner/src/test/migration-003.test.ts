@@ -30,6 +30,7 @@ it("adds leave and reads beside existing matches, and runs once", async () => {
     "002_rounds.sql",
     "003_wake.sql",
     "004_wake_marks.sql",
+    "005_floor.sql",
   ]);
   expect(await applyMigrations(url, all.slice(0, 2))).toEqual([
     "001_dinner.sql",
@@ -74,8 +75,9 @@ it("adds leave and reads beside existing matches, and runs once", async () => {
     ).rejects.toThrow(/match_reads_nudges_check/);
 
     // 004 keeps the marks there are, with no time, which counts as old.
-    expect(await applyMigrations(url, all)).toEqual(["004_wake_marks.sql"]);
-    expect(await applyMigrations(url, all)).toEqual([]);
+    const to004 = all.slice(0, 4);
+    expect(await applyMigrations(url, to004)).toEqual(["004_wake_marks.sql"]);
+    expect(await applyMigrations(url, to004)).toEqual([]);
     expect(await snapshot()).toEqual(before);
     const marks =
       await sql`SELECT player, waiting, nudges, woken_at FROM match_reads`;

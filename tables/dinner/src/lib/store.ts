@@ -12,7 +12,7 @@ import {
   advance,
   due,
   fold,
-  isExec,
+  kindOf,
   type AnyEvent as MatchEvent,
   type AnyState as MatchState,
   replay,
@@ -25,7 +25,10 @@ import { choose, wakesFor } from "./wake";
 
 // Matches in the database: their events, their results, and which are still
 // open. The rules of a match are in match.ts; this file runs each match's
-// clock and stores what the rules decide.
+// clock and stores what the rules decide. A match's due is when its clock
+// next changes it, which for the open floor includes the hidden moment
+// dinner comes: it stays in open_matches, read only to schedule the sweep,
+// and is never shown.
 
 export const MATCH_ID_RE = /^m_[A-Za-z0-9_-]{12}$/;
 
@@ -53,7 +56,7 @@ async function append(
       INSERT INTO events (match_id, seq, kind, body)
       VALUES (${id}, ${from + i}, ${e.body.kind}, ${tx.json(e)})`;
   // Wake the players these events need who let this Table wake them.
-  await choose(tx, id, wakesFor(state.players, events, isExec(state)), actor);
+  await choose(tx, id, wakesFor(state.players, events, kindOf(state)), actor);
   const next = due(state);
   // Liveness is a rule decision, not the presence of a scheduled deadline.
   if (state.phase !== "over")
@@ -96,6 +99,7 @@ export async function withMatch<T>(
     const at = new Date(
       Math.max(arrived.getTime(), Date.parse(stored.at(-1)?.body.at ?? "")),
     );
+    // Known race: a ballot begun just before dinner can lose this lock to the read that serves it, and gets match_over.
     const late = advance(replay(id, stored), at);
     const state = fold(replay(id, stored), late);
     const out = await fn(state, [...stored, ...late], tx, at);
