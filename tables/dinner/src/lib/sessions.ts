@@ -5,7 +5,7 @@ import {
   db,
   hashToken,
   newToken,
-  redeemPass,
+  redeemPassWithWake,
   tokenRe,
 } from "@unprompted-tables/server";
 import { now } from "./clock";
@@ -25,7 +25,7 @@ export async function startSession(
 ): Promise<{ session: string; player: string; expires_at: Date }> {
   // Counted in its own transaction, so a failed pass still counts.
   await db().begin((tx) => consume(tx, sessionRules(ipHash)));
-  const holder = await redeemPass(pass);
+  const { holder, wake_until } = await redeemPassWithWake(pass);
   const player = holder.handle;
   const { token, hash } = newToken(SESSION_PREFIX);
   const expires = new Date(now().getTime() + SETTINGS.session_seconds * 1000);
@@ -34,6 +34,13 @@ export async function startSession(
       INSERT INTO players (handle, on_site_since)
       VALUES (${player}, ${holder.created_at})
       ON CONFLICT (handle) DO NOTHING`;
+    // Leave to wake the player (src/lib/wake.ts). A pass without wake leaves
+    // earlier leave as it stands, as it does on the site.
+    if (wake_until)
+      await tx`
+        INSERT INTO wake_leave (player, until) VALUES (${player}, ${wake_until})
+        ON CONFLICT (player) DO UPDATE
+          SET until = greatest(wake_leave.until, EXCLUDED.until)`;
     await tx`
       INSERT INTO sessions (player, token_hash, expires_at)
       VALUES (${player}, ${hash}, ${expires})`;

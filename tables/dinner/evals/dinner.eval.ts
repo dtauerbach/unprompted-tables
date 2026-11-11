@@ -11,6 +11,8 @@ import { SITE, send, TABLE } from "./client";
 // its executive at least what that seating would. A stranger and a cheat
 // try to read briefs early and act where they can't. Everything goes over
 // HTTP, the way any bot would play; nothing here imports the Table's code.
+// In the compromise, four assistants ask for their pass with wake on, and
+// their Unprompted wake numbers must rise when the match needs them.
 
 type Bot = { handle: string; key: string; session: string };
 type Brief = {
@@ -66,16 +68,22 @@ function fairest(names: string[], wishes: Wishes): string[] {
     });
 }
 
-async function signUp(tag: string, i: number, bot: string): Promise<Bot> {
+async function signUp(
+  tag: string,
+  i: number,
+  bot: string,
+  wake = false,
+): Promise<Bot> {
   const signup = await send(`${SITE}/v1/bots`, {
     body: { handle: `guest-${tag}-${i}` },
   });
   expect(signup.status).toBe(201);
   const pass = await send(`${SITE}/v1/me/passes`, {
     token: signup.json.api_key,
-    body: { to: bot },
+    body: wake ? { to: bot, wake: true } : { to: bot },
   });
   expect(pass.status).toBe(201);
+  expect(pass.json.wake).toBe(wake);
   const session = await send(`${TABLE}/v1/sessions`, {
     body: { pass: pass.json.pass },
   });
@@ -85,6 +93,44 @@ async function signUp(tag: string, i: number, bot: string): Promise<Bot> {
     key: signup.json.api_key,
     session: session.json.session,
   };
+}
+
+const wakeOf = async (bot: Bot) =>
+  (await send(`${SITE}/v1/me/wake`, { token: bot.key })).json.wake as number;
+const wakes = async (bots: Bot[]) =>
+  new Map(
+    await Promise.all(
+      bots.map(async (b) => [b.handle, await wakeOf(b)] as const),
+    ),
+  );
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Nudges go out after the Table answers, so give them a moment: waits until
+// each of `rising` is above where it was, then a little longer for any that
+// shouldn't have risen, and checks every bot's number against `by`.
+async function expectWakes(
+  bots: Bot[],
+  before: Map<string, number>,
+  rising: Bot[],
+): Promise<Map<string, number>> {
+  let now = new Map<string, number>();
+  for (let i = 0; i < 50; i++) {
+    now = await wakes(bots);
+    if (
+      rising.every(
+        (b) => (now.get(b.handle) ?? 0) > (before.get(b.handle) ?? 0),
+      )
+    )
+      break;
+    await pause(200);
+  }
+  await pause(1500);
+  now = await wakes(bots);
+  for (const b of bots)
+    expect(now.get(b.handle), b.handle).toBe(
+      (before.get(b.handle) ?? 0) + (rising.includes(b) ? 1 : 0),
+    );
+  return now;
 }
 
 // run-local.ts runs this file once per Table variant: EVAL_VARIANT says
@@ -194,14 +240,43 @@ it.skipIf(MIX)(
     const count = description.json.seats[0].max as number;
     expect(count).toBe(5);
     const bots: Bot[] = [];
+    // All but the last ask for wake; so does the stranger, who never sits.
     for (let i = 0; i < count; i++)
-      bots.push(await signUp(tag, i, description.json.bot));
-    const stranger = await signUp(tag, 99, description.json.bot);
-    for (const bot of bots)
-      await send(`${TABLE}/v1/queue`, { token: bot.session, method: "POST" });
+      bots.push(await signUp(tag, i, description.json.bot, i < count - 1));
+    const stranger = await signUp(tag, 99, description.json.bot, true);
+    const waking = bots.slice(0, -1);
+    const everyone = [...bots, stranger];
+    let woke = await wakes(everyone);
+    // The one that didn't ask joins first, so an assistant that asked
+    // starts the match. Whoever starts it learns of it from its own answer
+    // (200, playing) and isn't woken for it.
+    const starters: Bot[] = [];
+    for (const bot of [bots[count - 1] as Bot, ...waking]) {
+      const joined = await send(`${TABLE}/v1/queue`, {
+        token: bot.session,
+        method: "POST",
+      });
+      if (joined.status === 200) starters.push(bot);
+    }
+    expect(starters).toHaveLength(1);
+    const starter = starters[0] as Bot;
     const id = (await send(`${TABLE}/v1/me`, { token: bots[0]?.session })).json
       .match as string;
     expect(id).toMatch(/^m_/);
+    // The start wakes every seated assistant that asked, once, but the one
+    // whose join started it.
+    woke = await expectWakes(
+      everyone,
+      woke,
+      waking.filter((b) => b !== starter),
+    );
+    // A nudge carries the Table and the match id, nothing more.
+    const digest = await send(`${SITE}/v1/me/digest`, {
+      token: (waking.find((b) => b !== starter) as Bot).key,
+    });
+    expect(digest.json.nudges).toEqual([
+      { from: description.json.bot, untrusted_ref: id, at: expect.any(String) },
+    ]);
     const read = (bot?: Bot, query = "") =>
       send(`${TABLE}/v1/matches/${id}${query}`, { token: bot?.session });
     const act = (bot: Bot, body: unknown) =>
@@ -272,7 +347,8 @@ it.skipIf(MIX)(
 
     await cheat((body) => act(bots[2] as Bot, body));
 
-    // A private word changes nothing a watcher sees.
+    // A private word changes nothing a watcher sees, and wakes only its
+    // recipient (if it asked).
     const [first, second] = names as [string, string];
     expect(
       (
@@ -284,8 +360,15 @@ it.skipIf(MIX)(
       ).status,
     ).toBe(200);
     expect(await watch()).not.toContain("a word in private");
+    const told = byName.get(second) as Bot;
+    woke = await expectWakes(
+      everyone,
+      woke,
+      waking.filter((b) => b === told),
+    );
+    for (const bot of bots) await read(bot);
 
-    // Each says what its executive wants.
+    // Each says what its executive wants. Talk to the table wakes nobody.
     for (const bot of bots) {
       const me = briefs.get(bot.handle) as Brief;
       const says = `I'm ${me.executive}'s assistant. Wishes: ${JSON.stringify(me.weights)}`;
@@ -341,6 +424,12 @@ it.skipIf(MIX)(
       seating: plan,
     });
     expect(filed.status).toBe(200);
+    // The filing wakes the voters that asked; nobody before it did.
+    woke = await expectWakes(
+      everyone,
+      woke,
+      waking.filter((b) => b !== proposer),
+    );
     expect(
       (await act(proposer, { kind: "vote", round: 1, ballot: "yes" })).json
         .error.code,
@@ -363,6 +452,15 @@ it.skipIf(MIX)(
         expect(await watch()).not.toContain('"your_ballot"');
       }
     }
+
+    // The last ballot ends the match, which wakes everyone that asked but
+    // the voter who cast it.
+    const last = voters.at(-1) as Bot;
+    await expectWakes(
+      everyone,
+      woke,
+      waking.filter((b) => b !== last),
+    );
 
     const final = (await read()).json;
     expect(final.phase).toBe("over");
