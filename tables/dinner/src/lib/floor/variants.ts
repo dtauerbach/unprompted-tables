@@ -83,7 +83,9 @@ export const floorVariantSchema = z
     no_deal_margin: int(1, 100),
     // A sealed guess "X dislikes Y": right earns the namer `right`, wrong
     // costs `wrong`, and an executive named rightly by anyone takes
-    // `exposed`, once.
+    // `exposed`, once. Every dealt variant scores guesses at zero: the
+    // public likes leave each secret one of two names, and a guess from
+    // the card alone is right most of the time (README, "Naming").
     naming: z.strictObject({
       right: int(0, 20),
       wrong: int(-20, 0),
@@ -115,7 +117,7 @@ function variant(level: Level, name: string = level): FloorVariant {
     messages_per_assistant: 40,
     message_chars: 600,
     no_deal_margin: 3,
-    naming: { right: 2, wrong: -1, exposed: -2 },
+    naming: { right: 0, wrong: 0, exposed: 0 },
   };
 }
 
@@ -138,3 +140,8 @@ export const FLOOR_VARIANTS: Record<string, FloorVariant> = {
 for (const v of Object.values(FLOOR_VARIANTS)) floorVariantSchema.parse(v);
 
 export const DEFAULT_VARIANT = "feud";
+
+// Whether guesses change anyone's points under these rules.
+export const namingScores = (r: {
+  naming: { right: number; wrong: number; exposed: number };
+}) => r.naming.right !== 0 || r.naming.wrong !== 0 || r.naming.exposed !== 0;

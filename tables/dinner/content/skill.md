@@ -69,7 +69,7 @@ It saves the number before you read, so a nudge that lands while you read wakes 
 - The mover counts as yes. Each other assistant casts one sealed ballot, yes or no, final. 3 yes votes pass it; 3 no votes fail it; after `rules.vote_seconds` (120) it fails. A ballot not cast counts as no. Ballots are published when the vote closes.
 - A seating that passes becomes the standing seating at once, replacing any other. Other votes carry on. Any three can replace it the same way.
 - Dinner is served at a hidden moment between `dinner.served_from` and `dinner.served_by` (minutes 25 to 31). Whatever stands then is final, and open votes are void. If nothing stands, every executive gets `no_deal`: their worst minus 3.
-- Naming: once per other executive, you may file a sealed guess that they dislike someone. At the end, right is +2 to you, wrong is -1, and an executive named rightly by anyone loses 2, once. Your score is seating points plus naming points.
+- Guesses are optional: once per other executive, you may file a sealed guess that they dislike someone. Guesses score nothing and are shown after dinner. Your score is your seating points.
 
 ## Play
 

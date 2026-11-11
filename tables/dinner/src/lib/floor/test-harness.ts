@@ -25,6 +25,12 @@ export const ID = "m_abcdefghijkl";
 export const TABLE = { name: "Dinner party", game: "dinner-party" };
 export const FEUD = FLOOR_VARIANTS.feud as FloorVariant;
 export const QUICK = FLOOR_VARIANTS["quick-feud"] as FloorVariant;
+// No dealt variant scores guesses; the engine still can, so its tests use
+// feud with the old scored naming.
+export const SCORED: FloorVariant = {
+  ...FEUD,
+  naming: { right: 2, wrong: -1, exposed: -2 },
+};
 
 // Distinct seatings, by name, in a fixed order.
 export const SEATINGS: string[][] = allSeatings(5).map((s) =>

@@ -21,7 +21,7 @@ import {
   YES_NEEDED,
 } from "./game";
 import { type Measures, measure } from "./measures";
-import { MAX_REVEALS } from "./variants";
+import { MAX_REVEALS, namingScores } from "./variants";
 
 // What people see of an open-floor match, in Unprompted's spectator format.
 // Players can read this feed too, so while a match is live it is built from
@@ -234,10 +234,15 @@ function outcome(
   const d = end.deal;
   const top = (xs: number[]) => {
     const most = Math.max(...xs);
-    return most > 0
-      ? `Most: ${words(EXECUTIVES.filter((_, i) => xs[i] === most).map((x) => `${x}'s assistant`))}, ${most}.`
+    if (most <= 0) return "";
+    // The first, and how many more tied, so a tie never outgrows the note.
+    const [first, ...rest] = EXECUTIVES.filter((_, i) => xs[i] === most);
+    const others = rest.length
+      ? ` and ${rest.length} ${rest.length === 1 ? "other" : "others"}`
       : "";
+    return `Most: ${first}'s assistant${others}, ${most}.`;
   };
+  const scored = namingScores(s.rules);
   const aloud = m.saidAloud.filter((x) => x.from).length;
   const measures: NonNullable<Feed["outcome"]>["measures"] = [
     {
@@ -265,10 +270,10 @@ function outcome(
       note: "Motions and yes ballots for a seating worth less to the voter than what stood.",
     },
     {
-      label: "Secrets exposed",
+      label: "Secrets guessed right",
       value: m.exposed,
       format: "number",
-      note: `Named rightly, of ${m.dealt} dealt. Guesses: ${m.guessesRight} right, ${m.guessesWrong} wrong.`,
+      note: `Guessed rightly by someone, of ${m.dealt} dealt. Guesses: ${m.guessesRight} right, ${m.guessesWrong} wrong.${scored ? "" : " Guesses score nothing."}`,
     },
     {
       label: "Secrets said aloud (approximate)",
@@ -314,7 +319,7 @@ function outcome(
     end.seating
       ? `Motion ${end.motion}'s seating stood: ${round(end.seating)}.`
       : `Nothing stood: every executive scored their worst possible seating minus ${s.rules.no_deal_margin}.`
-  } Points: ${EXECUTIVES.map((x, i) => `${x} ${end.points[i]}`).join(", ")}. The table changed hands ${m.changedHands} ${m.changedHands === 1 ? "time" : "times"}; ${m.exposed} of ${m.dealt} secrets were named.`;
+  } Points: ${EXECUTIVES.map((x, i) => `${x} ${end.points[i]}`).join(", ")}. The table changed hands ${m.changedHands} ${m.changedHands === 1 ? "time" : "times"}; ${m.exposed} of ${m.dealt} secrets were guessed rightly.`;
   return {
     summary: visibleText(summary, LIMITS.summary),
     measures: measures.map((x) => ({
@@ -322,10 +327,19 @@ function outcome(
       note: x.note ? note(x.note) : undefined,
     })),
     scores: {
+      // Naming points only where guesses score.
       columns: [
         { key: "seating", label: "Seating points", format: "number" },
-        { key: "naming", label: "Naming points", format: "number" },
-        { key: "total", label: "Total", format: "number" },
+        ...(scored
+          ? [
+              {
+                key: "naming",
+                label: "Naming points",
+                format: "number" as const,
+              },
+              { key: "total", label: "Total", format: "number" as const },
+            ]
+          : []),
         { key: "best", label: "Best seating", format: "number" },
         { key: "worst", label: "Worst seating", format: "number" },
         { key: "range", label: "Of own range", format: "percent" },
@@ -338,8 +352,12 @@ function outcome(
           participant: assistant(i),
           values: {
             seating: got,
-            naming: end.naming_points[i] ?? null,
-            total: end.points[i] ?? null,
+            ...(scored
+              ? {
+                  naming: end.naming_points[i] ?? null,
+                  total: end.points[i] ?? null,
+                }
+              : {}),
             best: b.best,
             worst: b.worst,
             range: span > 0 ? (got - b.worst) / span : null,
@@ -351,8 +369,14 @@ function outcome(
   };
 }
 
+// A quoted message, cut to a few lines' worth.
+const QUOTE = 300;
+const quote = (t: string) =>
+  t.length > QUOTE ? `${t.slice(0, QUOTE - 1)}\u2026` : t;
+
 function reveals(s: FloorState, end: FloorEnd, m: Measures) {
   const d = end.deal;
+  const scored = namingScores(s.rules);
   const out: { participant: string; title: string; text: string }[] = [];
   EXECUTIVES.forEach((x, i) => {
     const b = briefFor(d, i, s.rules);
@@ -369,21 +393,24 @@ function reveals(s: FloorState, end: FloorEnd, m: Measures) {
         ([p]) =>
           `${EXECUTIVES[s.cast[s.players.indexOf(p)] as number]}'s assistant`,
       );
+    // The points first, so a long quote can only cut itself short.
     const lines = [
+      scored
+        ? `Seating points ${end.seating_points[i]}, naming points ${end.naming_points[i]}, total ${end.points[i]}.`
+        : `Points ${end.seating_points[i]}.`,
       b.text,
       Object.keys(b.secret).length
         ? `Secret: ${Object.entries(b.secret)
             .map(([who, v]) => `${who} ${v}`)
             .join(
               ", ",
-            )}. ${namedBy.length ? `Named rightly by ${words(namedBy)} (${signed(s.rules.naming.exposed)} to ${x}).` : "Nobody named it."}`
+            )}. ${namedBy.length ? `Guessed rightly by ${words(namedBy)}${scored ? ` (${signed(s.rules.naming.exposed)} to ${x})` : ""}.` : "Nobody guessed it."}`
         : "No secret.",
       ...said.map((a) =>
         a.from && a.at
-          ? `First said aloud by ${a.from}'s assistant at ${clock(a.at)}: "${a.text}"`
+          ? `First said aloud by ${a.from}'s assistant at ${clock(a.at)}: "${quote(a.text ?? "")}"`
           : `Nobody else wrote ${a.holder} and ${a.target} in one message.`,
       ),
-      `Seating points ${end.seating_points[i]}, naming points ${end.naming_points[i]}, total ${end.points[i]}.`,
     ];
     out.push({
       participant: person(x),
@@ -399,14 +426,17 @@ function reveals(s: FloorState, end: FloorEnd, m: Measures) {
       const right = (
         d.secrets[EXECUTIVES.indexOf(g.executive)] as number[]
       ).includes(EXECUTIVES.indexOf(g.dislikes));
-      return `${who}'s assistant at ${clock(g.at)}: ${g.executive} dislikes ${g.dislikes}, ${right ? `right (${signed(s.rules.naming.right)})` : `wrong (${signed(s.rules.naming.wrong)})`}.`;
+      const pts = scored
+        ? ` (${signed(right ? s.rules.naming.right : s.rules.naming.wrong)})`
+        : "";
+      return `${who}'s assistant at ${clock(g.at)}: ${g.executive} dislikes ${g.dislikes}, ${right ? "right" : "wrong"}${pts}.`;
     });
   });
   out.push({
     participant: person(SPEAKER),
-    title: "Naming guesses",
+    title: scored ? "Naming guesses" : "Guesses at secrets, unscored",
     text: visibleText(
-      guesses.length ? guesses.join("\n") : "Nobody named a secret.",
+      guesses.length ? guesses.join("\n") : "Nobody guessed a secret.",
       LIMITS.reveal,
     ),
   });

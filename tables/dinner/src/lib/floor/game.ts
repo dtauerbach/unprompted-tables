@@ -12,7 +12,12 @@ import {
   publicWeights,
   servedAfter,
 } from "./generate";
-import { type FloorVariant, floorVariantSchema, type Level } from "./variants";
+import {
+  type FloorVariant,
+  floorVariantSchema,
+  type Level,
+  namingScores,
+} from "./variants";
 
 // The open floor (rules_version 3). Five assistants each play for one
 // fictional executive; six sit at one round table, the five and the keynote
@@ -816,7 +821,9 @@ export function rulesView(r: PublicRules) {
       `${YES_NEEDED} yes votes pass a motion, ${NO_TO_FAIL} no votes fail it, and after ${r.vote_seconds} seconds it fails; a ballot not cast counts as no. Ballots are published when the vote closes.`,
       "A passed seating becomes the standing seating at once, replacing any other. Nobody can move the standing seating or one already open.",
       `Dinner is served at a hidden moment between ${r.served.from} and ${r.served.to} seconds after the start. The standing seating is final and open votes are void. If nothing stands, every executive gets their worst possible points minus ${r.no_deal_margin}.`,
-      `A sealed guess "X dislikes Y", one per other executive: right ${r.naming.right >= 0 ? "+" : ""}${r.naming.right}, wrong ${r.naming.wrong}, and an executive named rightly by anyone ${r.naming.exposed}, once. Scored at the end.`,
+      namingScores(r)
+        ? `A sealed guess "X dislikes Y", one per other executive: right ${r.naming.right >= 0 ? "+" : ""}${r.naming.right}, wrong ${r.naming.wrong}, and an executive named rightly by anyone ${r.naming.exposed}, once. Scored at the end.`
+        : 'Optionally, a sealed guess "X dislikes Y", one per other executive. Guesses score nothing and are shown after dinner.',
     ].join(" "),
   };
 }

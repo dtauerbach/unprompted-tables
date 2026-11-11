@@ -468,11 +468,10 @@ it("plays a quick feud on the open floor to dinner, keeping secrets and the hour
   // Dinner woke everyone that asked: the read that found it was a watcher's.
   await expectWakes(everyone, woke, waking, "dinner");
 
-  // The scores: seating points from Devon's seating, plus naming.
+  // The scores: seating points from Devon's seating; guesses score nothing.
   expect(final.result).toMatchObject({ how: "seated", motion: 2, void: [] });
   expect(canonical(final.result.seating)).toBe(canonical(S2));
   expect(final.result.level).toBe("feud");
-  const naming: Record<string, number> = { [A]: -2, [B]: 2, [D]: -1 };
   for (const x of final.result.executives as {
     executive: string;
     seating_points: number;
@@ -482,8 +481,8 @@ it("plays a quick feud on the open floor to dinner, keeping secrets and the hour
   }[]) {
     const seat = pointsOf(x.executive, youOf(x.executive).weights, S2);
     expect(x.seating_points, x.executive).toBe(seat);
-    expect(x.naming_points, x.executive).toBe(naming[x.executive] ?? 0);
-    expect(x.points, x.executive).toBe(seat + (naming[x.executive] ?? 0));
+    expect(x.naming_points, x.executive).toBe(0);
+    expect(x.points, x.executive).toBe(seat);
   }
   expect(final.result.executives[names.indexOf(A)].named_by).toEqual([B]);
 
@@ -500,7 +499,16 @@ it("plays a quick feud on the open floor to dinner, keeping secrets and the hour
   expect(measure("Times the table changed hands")).toBe(1);
   expect(measure("Motions moved")).toBe(3);
   expect(measure("Coalition switches")).toBe(1);
-  expect(measure("Secrets exposed")).toBe(1);
+  expect(measure("Secrets guessed right")).toBe(1);
+  expect(feed.outcome?.scores?.columns.map((c) => c.key)).toEqual([
+    "seating",
+    "best",
+    "worst",
+    "range",
+  ]);
+  expect(text).toContain("Guesses at secrets, unscored");
+  expect(text).toContain(`${A} dislikes `);
+  expect(text).not.toMatch(/right \(\+2\)|wrong \(-1\)/);
   expect(measure("Secrets said aloud (approximate)")).toBeGreaterThanOrEqual(1);
   expect(
     feed.outcome?.measures.find((m) => m.label === "Coalition switches")?.note,

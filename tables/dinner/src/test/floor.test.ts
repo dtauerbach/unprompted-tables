@@ -130,7 +130,7 @@ describe("the open floor over HTTP", () => {
       vote_seconds: 30,
       served_between_seconds: [90, 120],
       motions_per_assistant: 3,
-      naming: { right: 2, wrong: -1, exposed: -2 },
+      naming: { right: 0, wrong: 0, exposed: 0 },
     });
     expect(d.text).not.toMatch(/feud|simmer|knives|level/);
     const s = await call(skill);
@@ -143,6 +143,14 @@ describe("the open floor over HTTP", () => {
       expect(s.text).toContain(move);
     expect(s.text).not.toMatch(/feud|simmer|knives/);
     expect(s.text).not.toContain("{{");
+    // Guesses are optional and unscored, and the guide says so.
+    expect(s.text).toContain(
+      "Guesses score nothing and are shown after dinner.",
+    );
+    expect(s.text).not.toMatch(/naming points|\+2 to you/);
+    expect(d.body.rules.summary).toContain(
+      "Guesses score nothing and are shown after dinner.",
+    );
   });
 
   it("plays a match: a pass, an overturn, guesses, and dinner, then reveals it all", async () => {
@@ -241,9 +249,8 @@ describe("the open floor over HTTP", () => {
     );
     const order = S2.map((x) => EXECUTIVES.indexOf(x));
     const seat = points(d, order);
-    const naming = EXECUTIVES.map((x) =>
-      x === A ? -2 : x === B ? 2 : x === D ? -1 : 0,
-    );
+    // Guesses score nothing: a right one, a wrong one and the executive
+    // named rightly all keep their seating points.
     expect(done.result).toMatchObject({ how: "seated", motion: 2 });
     expect(
       done.result.executives.map(
@@ -253,7 +260,7 @@ describe("the open floor over HTTP", () => {
           points: number;
         }) => [x.seating_points, x.naming_points, x.points],
       ),
-    ).toEqual(seat.map((v, i) => [v, naming[i], v + (naming[i] as number)]));
+    ).toEqual(seat.map((v) => [v, 0, v]));
     expect(done.talk).toHaveLength(2);
     expect(await countRows("results")).toBe(1);
     expect(await countRows("open_matches")).toBe(0);

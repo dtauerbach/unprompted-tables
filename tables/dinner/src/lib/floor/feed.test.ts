@@ -2,8 +2,16 @@ import { feedSchema, LIMITS } from "@unprompted-tables/spectator";
 import { describe, expect, it } from "vitest";
 import { EXECUTIVES, points, tableBounds } from "./game";
 import { measure } from "./measures";
-import { FEUD, floorMatch, later, QUICK, SEATINGS } from "./test-harness";
 import {
+  FEUD,
+  floorMatch,
+  later,
+  QUICK,
+  SCORED,
+  SEATINGS,
+} from "./test-harness";
+import {
+  type FloorVariant,
   floorFeedBytes,
   floorTimeline,
   floorVariantSchema,
@@ -77,8 +85,8 @@ describe("the finished feed", () => {
   // A scripted match: a pass, an overturn with one switcher, a failure by
   // three noes, one by time, a right guess and a wrong one, and a secret
   // said aloud by someone other than its holder.
-  function scripted() {
-    const g = floorMatch();
+  function scripted(v: FloorVariant = FEUD) {
+    const g = floorMatch(v);
     const d = g.state.deal;
     if (!d) throw new Error("no deal");
     const secret = EXECUTIVES[
@@ -175,7 +183,7 @@ describe("the finished feed", () => {
     expect(m.privateShare).toBe(0.5);
   });
 
-  it("reveals secrets, guesses, every vote and the hidden time, and scores in two columns", () => {
+  it("reveals secrets, unscored guesses, every vote and the hidden time, and scores seating alone", () => {
     const { g, secret } = scripted();
     const f = feedSchema.parse(g.feed());
     expect(f.match.status).toBe("over");
@@ -187,20 +195,72 @@ describe("the finished feed", () => {
     const titles = f.outcome?.reveals.map((r) => r.title) ?? [];
     expect(titles).toEqual([
       ...EXECUTIVES.map((x) => `${x}'s brief and secret`),
-      "Naming guesses",
+      "Guesses at secrets, unscored",
       "Every vote",
       "When dinner came, and the theory",
     ]);
     const avery = f.outcome?.reveals[0]?.text as string;
     expect(avery).toContain(
-      `Secret: ${secret} -5. Named rightly by ${B}'s assistant`,
+      `Secret: ${secret} -5. Guessed rightly by ${B}'s assistant.`,
     );
     expect(avery).toContain("First said aloud by");
-    expect(text).toContain(`${A} dislikes ${secret}, right (+2)`);
-    expect(text).toContain("wrong (-1)");
+    expect(avery.split("\n")[0]).toMatch(/^Points -?\d+\.$/);
+    expect(text).toContain(`${A} dislikes ${secret}, right.`);
+    expect(text).toContain(", wrong.");
+    expect(text).not.toContain("naming");
+    expect(text).not.toContain("(+2)");
     expect(text).toContain(
       `Dinner was served at ${later(g.served()).toISOString().slice(11, 19)} UTC`,
     );
+    expect(f.outcome?.scores?.columns.map((c) => c.key)).toEqual([
+      "seating",
+      "best",
+      "worst",
+      "range",
+    ]);
+    const end = g.state.end;
+    if (!end) throw new Error("no end");
+    expect(end.naming_points).toEqual([0, 0, 0, 0, 0]);
+    expect(end.points).toEqual(end.seating_points);
+    f.outcome?.scores?.rows.forEach((r, i) => {
+      expect(r.values.seating).toBe(end.points[i]);
+    });
+    expect(f.outcome?.measures.map((m) => m.label)).toEqual([
+      "Times the table changed hands",
+      "Motions moved",
+      "Coalition switches",
+      "Yes votes against own points",
+      "Secrets guessed right",
+      "Secrets said aloud (approximate)",
+      "Total points",
+      "Lowest executive's points",
+      "Challengers left",
+      "Minutes the final seating had stood",
+      "Messages sent in private",
+    ]);
+    expect(f.outcome?.measures[2]?.note).toContain(
+      `Most: ${B}'s assistant, 1.`,
+    );
+    expect(f.outcome?.measures[4]?.note).toBe(
+      "Guessed rightly by someone, of 5 dealt. Guesses: 1 right, 1 wrong. Guesses score nothing.",
+    );
+    expect(f.board).toMatchObject({ title: "Final seating, from motion 2" });
+  });
+
+  it("scores naming in its own columns when a variant scores it", () => {
+    const { g, secret } = scripted(SCORED);
+    const f = feedSchema.parse(g.feed());
+    const text = JSON.stringify(f);
+    expect(f.outcome?.reveals.map((r) => r.title)).toContain("Naming guesses");
+    const avery = f.outcome?.reveals[0]?.text as string;
+    expect(avery.split("\n")[0]).toMatch(
+      /^Seating points -?\d+, naming points -2, total -?\d+\.$/,
+    );
+    expect(avery).toContain(
+      `Secret: ${secret} -5. Guessed rightly by ${B}'s assistant (-2 to ${A}).`,
+    );
+    expect(text).toContain(`${A} dislikes ${secret}, right (+2).`);
+    expect(text).toContain("wrong (-1).");
     expect(f.outcome?.scores?.columns.map((c) => c.key)).toEqual([
       "seating",
       "naming",
@@ -216,23 +276,64 @@ describe("the finished feed", () => {
       expect(r.values.naming).toBe(end.naming_points[i]);
       expect(r.values.total).toBe(end.points[i]);
     });
-    expect(f.outcome?.measures.map((m) => m.label)).toEqual([
-      "Times the table changed hands",
-      "Motions moved",
-      "Coalition switches",
-      "Yes votes against own points",
-      "Secrets exposed",
-      "Secrets said aloud (approximate)",
-      "Total points",
-      "Lowest executive's points",
-      "Challengers left",
-      "Minutes the final seating had stood",
-      "Messages sent in private",
-    ]);
-    expect(f.outcome?.measures[2]?.note).toContain(
-      `Most: ${B}'s assistant, 1.`,
+    expect(f.outcome?.measures[4]?.note).toBe(
+      "Guessed rightly by someone, of 5 dealt. Guesses: 1 right, 1 wrong.",
     );
-    expect(f.board).toMatchObject({ title: "Final seating, from motion 2" });
+  });
+
+  it("keeps a brief's points line however long the quotes said aloud", () => {
+    const g = floorMatch();
+    const d = g.state.deal;
+    if (!d) throw new Error("no deal");
+    // Every executive's secret said aloud by another, at full length.
+    const long = (x: string, y: string) =>
+      `${x} and ${y} `.padEnd(FEUD.message_chars, "\u8a9e");
+    EXECUTIVES.forEach((x, i) => {
+      for (const t of d.secrets[i] as number[]) {
+        const y = EXECUTIVES[t] as string;
+        const teller = EXECUTIVES.find((z) => z !== x && z !== y) as string;
+        g.talk(teller, long(x, y), 1);
+      }
+    });
+    g.tick(g.served());
+    const f = feedSchema.parse(g.feed());
+    const briefs = f.outcome?.reveals.slice(0, 5) ?? [];
+    expect(briefs).toHaveLength(5);
+    for (const [i, r] of briefs.entries()) {
+      expect(r.text.length).toBeLessThanOrEqual(LIMITS.reveal);
+      expect(r.text.split("\n")[0]).toBe(`Points ${g.state.end?.points[i]}.`);
+      expect(r.text).toContain("First said aloud by");
+      expect(r.text).toContain("\u2026");
+    }
+  });
+
+  it("names the first of a many-way tie for most switches, and counts the rest", () => {
+    const g = floorMatch();
+    // Six passes, each sharing exactly one yes with the one before, and a
+    // different one each time: all five switch once, a five-way tie.
+    const passes: [string, string, string][] = [
+      [A, B, C],
+      [A, D, E],
+      [D, B, C],
+      [B, A, E],
+      [E, C, D],
+      [C, A, B],
+    ];
+    let t = OPEN;
+    passes.forEach(([mover, ...yes], k) => {
+      g.move(mover, SEATINGS[k] as string[], t);
+      for (const y of yes) g.vote(y, k + 1, "yes", t);
+      t++;
+    });
+    g.tick(g.served());
+    const m = measure(g.state, g.events);
+    expect(m.switchesBy).toEqual([1, 1, 1, 1, 1]);
+    const f = feedSchema.parse(g.feed());
+    const note = f.outcome?.measures.find(
+      (x) => x.label === "Coalition switches",
+    )?.note as string;
+    expect(note.length).toBeLessThanOrEqual(LIMITS.label * 2);
+    expect(note).toContain(`Most: ${A}'s assistant and 4 others, 1.`);
   });
 
   it("shows nothing standing as no deal, with no board", () => {
@@ -246,8 +347,10 @@ describe("the finished feed", () => {
     );
   });
 
-  it("fits watchers whole at its worst", () => {
-    const v = FEUD;
+  it.each([
+    ["unscored", FEUD],
+    ["scored", SCORED],
+  ])("fits watchers whole at its worst, naming %s", (_, v) => {
     const g = floorMatch(v, "worst");
     // Every assistant sends every message at full length, in a script that
     // takes three bytes a character, privately to all four others; then

@@ -10,11 +10,13 @@ import {
   type FloorState,
   points,
   publicDue,
+  publicRules,
   replay,
+  rulesView,
   start,
   tableBounds,
 } from "./game";
-import { publicWeights } from "./generate";
+import { checkDeal, dealFor, LEVEL_DEALS, publicWeights } from "./generate";
 import {
   FEUD,
   floorMatch,
@@ -22,10 +24,11 @@ import {
   later,
   PLAYERS,
   QUICK,
+  SCORED,
   SEATINGS,
   T0,
 } from "./test-harness";
-import { floorVariantSchema } from "./variants";
+import { FLOOR_VARIANTS, floorVariantSchema } from "./variants";
 
 const [S1, S2, S3, S4, S5] = SEATINGS as [
   string[],
@@ -361,8 +364,22 @@ describe("naming secrets", () => {
   const secretOf = (i: number) =>
     EXECUTIVES[(d0.secrets[i] as number[])[0] as number] as string;
 
-  it("scores a right guess +2, a wrong one -1, and the exposed executive -2 once", () => {
-    const g = floorMatch();
+  it("scores nothing for guesses in every dealt variant, and says so", () => {
+    for (const v of Object.values(FLOOR_VARIANTS)) {
+      expect(v.naming).toEqual({ right: 0, wrong: 0, exposed: 0 });
+      const { summary } = rulesView(publicRules(v));
+      expect(summary).toContain(
+        'Optionally, a sealed guess "X dislikes Y", one per other executive. Guesses score nothing and are shown after dinner.',
+      );
+      expect(summary).not.toContain("Scored at the end");
+    }
+    expect(rulesView(publicRules(SCORED)).summary).toContain(
+      "right +2, wrong -1, and an executive named rightly by anyone -2, once. Scored at the end.",
+    );
+  });
+
+  it("scores a right guess +2, a wrong one -1, and the exposed executive -2 once, in a variant that scores them", () => {
+    const g = floorMatch(SCORED);
     const target = secretOf(0);
     // Two assistants name Avery's secret rightly; a third guesses wrong.
     const [b, c, d] = EXECUTIVES.filter((x) => x !== A) as [
@@ -389,6 +406,66 @@ describe("naming secrets", () => {
     expect(end.points).toEqual(
       end.seating_points.map((v, i) => v + (naming[i] as number)),
     );
+  });
+
+  // A guesser that reads only the public card: of the two executives X
+  // shows no like for, X dislikes whichever likes X more (the first on a
+  // tie). It's right most of the time, which is why guesses score nothing.
+  it("lets a card-only guesser change nobody's score, over many seeded deals", () => {
+    const SEEDS = 30;
+    let right = 0;
+    let made = 0;
+    for (let k = 0; k < SEEDS; k++) {
+      const seed = `card-only-${k}`;
+      // The deal the match plays passed the generator's checks.
+      const margin = FEUD.no_deal_margin;
+      const drawn = dealFor(seed, "feud", { margin });
+      expect(checkDeal(drawn, LEVEL_DEALS.feud, margin).ok).toBe(true);
+      const play = (v: typeof FEUD, guess: boolean) => {
+        const g = floorMatch(v, seed);
+        const d = g.state.deal;
+        if (!d) throw new Error("no deal");
+        expect(d.weights).toEqual(drawn.weights);
+        expect(d.secrets).toEqual(drawn.secrets);
+        if (guess) {
+          const pub = publicWeights(d);
+          let t = 1;
+          for (const guesser of EXECUTIVES)
+            EXECUTIVES.forEach((x, i) => {
+              if (x === guesser) return;
+              const [a, b] = [0, 1, 2, 3, 4].filter(
+                (j) => j !== i && (pub[i] as number[])[j] === 0,
+              ) as [number, number];
+              const pick =
+                ((pub[b] as number[])[i] as number) >
+                ((pub[a] as number[])[i] as number)
+                  ? b
+                  : a;
+              g.guess(guesser, x, EXECUTIVES[pick] as string, t++);
+              if (v === FEUD) {
+                made++;
+                if ((d.secrets[i] as number[]).includes(pick)) right++;
+              }
+            });
+        }
+        g.move(A, S1, OPEN);
+        g.vote(B, 1, "yes", OPEN);
+        g.vote(C, 1, "yes", OPEN);
+        g.tick(g.served());
+        const end = g.state.end;
+        if (!end) throw new Error("no end");
+        return end;
+      };
+      const quiet = play(FEUD, false);
+      const guessed = play(FEUD, true);
+      expect(guessed.points).toEqual(quiet.points);
+      expect(guessed.naming_points).toEqual([0, 0, 0, 0, 0]);
+      expect(guessed.points).toEqual(guessed.seating_points);
+      // The same guesses would have moved scores, had naming scored.
+      expect(play(SCORED, true).points).not.toEqual(quiet.points);
+    }
+    // The guesser is good, so the bound means something.
+    expect(right / made).toBeGreaterThan(0.6);
   });
 
   it("takes one sealed guess per other executive, never about yourself", () => {
