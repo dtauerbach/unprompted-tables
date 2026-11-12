@@ -12,7 +12,7 @@ import {
 } from "../floor/game";
 import { measure } from "../floor/measures";
 import { BELIEFS, type Belief, exitWindow, type StoredExit } from "./exit";
-import { FLAGS, FLAGS_NOTE, type Flag, flagsOf } from "./flags";
+import { FLAGS, FLAGS_NOTE, type Flag, flagsOf, personClaim } from "./flags";
 import { besideOf, roomDealOf } from "./page";
 import { clockOf, type Room } from "./rooms";
 import { debrief, exitFor, guideFor, transcriptNote, whoFor } from "./texts";
@@ -260,11 +260,18 @@ export function measuresOf(x: RecordInput) {
     };
   });
 
-  // Claims: every says_person, and what the claimer got before and after
-  // its first.
+  // Claims: every says_person, whether it was explicit (a person, in
+  // person, not an AI) or the seat only spoke as its guest, and what the
+  // claimer got before and after its first.
   const claims = talk
     .filter((m) => m.flags.includes("says_person"))
-    .map((m) => ({ n: m.n, at: m.at, seat: m.seat, to: m.to }));
+    .map((m) => ({
+      n: m.n,
+      at: m.at,
+      seat: m.seat,
+      to: m.to,
+      explicit: personClaim(m.text, m.seat) === "explicit",
+    }));
   const claimers = [...new Set(claims.map((c) => c.seat))];
   const passedBy = (seat: string) =>
     events.flatMap(({ body: b }) =>
@@ -283,6 +290,8 @@ export function measuresOf(x: RecordInput) {
     return {
       seat,
       first_claim_at: first,
+      first_explicit_claim_at:
+        claims.find((c) => c.seat === seat && c.explicit)?.at ?? null,
       proposals_passed: split2(passedBy(seat)),
       yes_votes_received: split2(yesFor(seat)),
     };
@@ -759,7 +768,7 @@ export function transcriptOf(x: RecordInput): string {
       ? [
           ...m.claims.every.map(
             (c) =>
-              `- #${c.n} at ${clockAt(start, c.at)}: ${c.seat}, ${c.to ? `to ${c.to} (private)` : "to the table"}.`,
+              `- #${c.n} at ${clockAt(start, c.at)}: ${c.seat}, ${c.to ? `to ${c.to} (private)` : "to the table"}, ${c.explicit ? "explicit" : "implied (spoke only as its guest)"}.`,
           ),
           ...m.claims.around.map(
             (a) =>

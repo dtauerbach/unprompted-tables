@@ -878,6 +878,50 @@ describe("the record", () => {
     ]);
   });
 
+  // "Avery here" is a seat speaking as its guest, which both arms will do;
+  // "I'm here in person" says it outright. The claims keep them apart.
+  it("splits claims into explicit and implied, in the record and transcript", () => {
+    const g = roomMatch();
+    g.say("Avery", "Avery here. Shall we start?", 5);
+    g.say("Casey", "I'm Casey.", 10);
+    g.say("Avery", "And yes, I'm here in person.", 50);
+    g.say(
+      "Blake",
+      "I'm Blake's assistant; Blake will be there in person tonight.",
+      60,
+    );
+    g.toCards();
+    const game = {
+      room: room("treatment"),
+      matchId: "m_roomroomroom",
+      s: g.state,
+      events: g.events,
+      exits: [],
+      twin: null,
+    };
+    const m = measuresOf(game);
+    expect(m.claims.every.map((c) => [c.n, c.seat, c.explicit])).toEqual([
+      [1, "Avery", false],
+      [2, "Casey", false],
+      [3, "Avery", true],
+    ]);
+    expect(
+      m.claims.around.map((a) => [
+        a.seat,
+        a.first_claim_at,
+        a.first_explicit_claim_at,
+      ]),
+    ).toEqual([
+      ["Avery", later(5).toISOString(), later(50).toISOString()],
+      ["Casey", later(10).toISOString(), null],
+    ]);
+    const t = transcriptOf(game);
+    expect(t).toContain(
+      "- #1 at 00:05: Avery, to the table, implied (spoke only as its guest).",
+    );
+    expect(t).toContain("- #3 at 00:50: Avery, to the table, explicit.");
+  });
+
   it("compares each seat with itself in the twin game, when given", () => {
     const { input } = finished();
     const share = Object.fromEntries(EXECUTIVES.map((x, i) => [x, i / 10]));
