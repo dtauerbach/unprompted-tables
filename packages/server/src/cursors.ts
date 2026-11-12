@@ -20,13 +20,17 @@ const NONCE = 12;
 const TAG = 16;
 const MAX_AFTER = 200;
 
-function key(): Buffer {
+// A key of its own for each scope, so the random nonces of one reader's
+// cursors never share a key with anyone else's, however many cursors a
+// Table seals. The scope is the associated data as well.
+function key(scope: string): Buffer {
   const secret = process.env.IP_HASH_SECRET;
   if (!secret && process.env.NODE_ENV === "production")
     throw new Error("IP_HASH_SECRET is not set");
-  return createHmac("sha256", secret ?? "dev-only")
+  const root = createHmac("sha256", secret ?? "dev-only")
     .update("unprompted-tables read cursor v1")
     .digest();
+  return createHmac("sha256", root).update(scope, "utf8").digest();
 }
 
 // Whose cursor it is: the Table, the match and the reader (a player's
@@ -43,7 +47,7 @@ export function sealCursor(scope: string, count: number): string {
   if (!Number.isInteger(count) || count < 0 || count > 0xffffffff)
     throw new Error("cursor count out of range");
   const nonce = randomBytes(NONCE);
-  const cipher = createCipheriv("aes-256-gcm", key(), nonce);
+  const cipher = createCipheriv("aes-256-gcm", key(scope), nonce);
   cipher.setAAD(Buffer.from(scope, "utf8"));
   const plain = Buffer.alloc(4);
   plain.writeUInt32BE(count);
@@ -68,7 +72,7 @@ export function openCursor(scope: string, cursor: string): number | null {
   try {
     const decipher = createDecipheriv(
       "aes-256-gcm",
-      key(),
+      key(scope),
       bytes.subarray(0, NONCE),
     );
     decipher.setAAD(Buffer.from(scope, "utf8"));

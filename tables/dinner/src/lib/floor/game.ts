@@ -1058,6 +1058,7 @@ function changed(s: FloorState, e: Body) {
         at: e.at,
         how: e.how,
         seating: e.seating,
+        void: e.void,
       };
     default:
       return null;

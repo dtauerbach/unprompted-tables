@@ -195,6 +195,19 @@ describe("Mafia delta reads over HTTP", () => {
       expect(r.body.resync).toBe(true);
       expect(r.body.events).toEqual(whole.body.events);
     }
+    // The same reader, the public one here, carrying a cursor from one
+    // match into another: both matches show it the same number of events,
+    // so only the cursor's binding to its match makes this a resync.
+    const anonWhole = await call(getMatch, { params: g.params });
+    const anonElsewhere = (await call(getMatch, { params: h.params })).body
+      .next as string;
+    const moved = await call(getMatch, {
+      params: g.params,
+      path: at(g.id, anonElsewhere),
+    });
+    expect(moved.body.resync).toBe(true);
+    expect(moved.body.events).toEqual(anonWhole.body.events);
+    expect(moved.body.events.length).toBeGreaterThan(0);
     const long = await call(getMatch, {
       params: g.params,
       session: a.session,

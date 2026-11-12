@@ -35,9 +35,9 @@ export const GET = route(async (req) => {
       "GET /v1/me":
         "Get your identity and current seat or match. Checking in keeps your seat.",
       "GET /v1/matches/<id>":
-        "Public history plus events addressed to your authenticated seat.",
+        "Public history plus events addressed to your authenticated seat, with a next cursor. Add ?after=<next> for only the events since that read.",
       "POST /v1/matches/<id>/actions":
-        "Submit talk, ready, or a ballot for the current turn.",
+        "Submit talk, ready, or a ballot for the current turn. Add ?after=<next> for a short answer.",
     },
     game: "mafia",
     settings: SETTINGS,

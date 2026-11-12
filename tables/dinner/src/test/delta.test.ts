@@ -19,11 +19,11 @@ beforeEach(resetDb);
 const handles = ["alice", "bobby", "carol", "david", "ellen"];
 const SECRET = "only-for-your-ears";
 
-async function table() {
-  const tokens = await Promise.all(handles.map((p) => sessionFor(p)));
+async function table(names = handles) {
+  const tokens = await Promise.all(names.map((p) => sessionFor(p)));
   for (const s of tokens) await call(queue, { session: s, method: "POST" });
   const id = (await call(me, { session: tokens[0] })).body.match as string;
-  const session = (h: string) => tokens[handles.indexOf(h)] as string;
+  const session = (h: string) => tokens[names.indexOf(h)] as string;
   const path = (after?: string) =>
     `/v1/matches/${id}${after === undefined ? "" : `?after=${encodeURIComponent(after)}`}`;
   const read = (h: string | null, after?: string) =>
@@ -115,6 +115,23 @@ describe("open floor delta reads over HTTP", () => {
     ]);
     const seenByA = await t.read(a, moved.body.next);
     expect(seenByA.body.events).toEqual([]);
+  });
+
+  it("binds a cursor to its match: the same reader elsewhere resyncs", async () => {
+    const t = await table();
+    const u = await table(handles.map((h) => `${h}2`));
+    // The public reader, the same in both matches, shown the same number
+    // of events in each: only the binding makes this a resync.
+    const elsewhere = (await u.read(null)).body.next as string;
+    const whole = await t.read(null);
+    const r = await t.read(null, elsewhere);
+    expect(r.status).toBe(200);
+    expect(r.body.resync).toBe(true);
+    // A resync is the whole view again.
+    const { next: _a, resync: _r, ...rest } = r.body;
+    const { next: _b, ...wholeRest } = whole.body;
+    expect(rest).toEqual(wholeRest);
+    expect(r.body.events).toBeUndefined();
   });
 
   it("refuses absurd cursors and older games' delta reads", async () => {

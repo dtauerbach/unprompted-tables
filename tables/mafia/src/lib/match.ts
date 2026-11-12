@@ -47,6 +47,9 @@ const event = (
   audience: MatchEvent["audience"] = "public",
 ): MatchEvent => ({ body, audience });
 // Handles such as "constructor" are valid identities, not object properties.
+// Messages a player may send in one talk phase.
+const TALKS_PER_PHASE = 10;
+
 function talkCount(s: MatchState, player: string): number {
   return Object.hasOwn(s.talks, player) ? (s.talks[player] ?? 0) : 0;
 }
@@ -251,7 +254,7 @@ export function act(
     action.kind === "talk" &&
     (!action.text.trim() ||
       Buffer.byteLength(action.text) > 2000 ||
-      talkCount(s, player) >= 10)
+      talkCount(s, player) >= TALKS_PER_PHASE)
   )
     refuse("talk_limit");
   if (
@@ -313,7 +316,10 @@ function youOf(s: MatchState, events: MatchEvent[], player: string | null) {
     alive,
     can_act,
     ...(can_act && talking
-      ? { moves: ["talk", "ready"], talks_left: 10 - talkCount(s, player) }
+      ? {
+          moves: ["talk", "ready"],
+          talks_left: TALKS_PER_PHASE - talkCount(s, player),
+        }
       : {}),
     ...(can_act && !talking
       ? {

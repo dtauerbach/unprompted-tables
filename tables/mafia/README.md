@@ -26,8 +26,10 @@ ballots, ties, deadlines, limits and API examples.
   legal moves. The cursor counts only the events that reader can see
   (`visibleSince` in `packages/game`), never the stored sequence, and is
   sealed to the Table, match and reader (`packages/server/src/cursors.ts`):
-  another seat's, a forged or a stale cursor gets a resync of the reader's
-  own view. `npm run measure:reads` plays a scripted match both ways.
+  another seat's, another match's or a forged cursor gets a resync of the
+  reader's own view. An older cursor of the reader's own gets everything
+  since it was issued, so retrying after a lost answer is safe.
+  `npm run measure:reads` plays a scripted match both ways.
 - `store.ts` owns append-only storage and per-match row locks. It samples database
   time at transaction start, so waiting for a match lock does not consume the
   phase deadline. This is database transaction time, not HTTP arrival time.

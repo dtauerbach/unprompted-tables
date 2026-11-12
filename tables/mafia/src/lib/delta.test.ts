@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import { act, apply, delta, type MatchEvent, replay, view } from "./match";
 import { dealt, simulate } from "./read-cost";
 import type { Rules } from "./settings";
+import { present } from "./store";
 
 // The delta read and its cursor. The cursor counts only the events a seat
 // can see, so a seat's reads never step over, or measure, the private
 // events of others (night talk, other seats' roles), and it is sealed to
-// one seat of one match, so another seat's cursor, a forged one or a stale
-// one gives a resync of the reader's own view, never someone else's.
+// one seat of one match, so another seat's cursor, another match's or a
+// forged one gives a resync of the reader's own view, never someone
+// else's. A stale but genuine cursor gives everything since it was issued.
 
 const seven = ["ada", "bea", "cal", "dot", "eve", "fay", "gus"];
 const MAFIA = ["ada", "bea"];
@@ -55,6 +57,39 @@ function toNight(nightTalk: number) {
   };
 }
 
+// The same match played the same way in public, with the mafia dealt to
+// different seats: at each step, the village seats' answers are taken.
+// Night talk and night votes happen in both worlds, by whoever the mafia
+// are, so only what a village seat must not learn differs.
+function twin(mafia: string[]) {
+  const { log, at } = dealt(seven, rules, mafia);
+  let s = replay("m_simulatedmatc", log);
+  const add = (es: MatchEvent[]) => {
+    log.push(...es);
+    s = es.reduce(apply, s);
+  };
+  const steps: { phase: string; s: typeof s; log: MatchEvent[] }[] = [];
+  const snap = () => steps.push({ phase: s.phase, s, log: [...log] });
+  snap();
+  add(act(s, "cal", { turn: 1, kind: "talk", text: "good morning" }, at));
+  for (const p of seven) add(act(s, p, { turn: 1, kind: "ready" }, at));
+  snap();
+  add(act(s, "fay", { turn: 2, kind: "vote", target: null }, at));
+  snap();
+  for (const p of seven.filter((p) => p !== "fay"))
+    add(act(s, p, { turn: 2, kind: "vote", target: null }, at));
+  snap();
+  add(act(s, mafia[0] as string, { turn: 3, kind: "talk", text: "psst" }, at));
+  snap();
+  for (const p of mafia) add(act(s, p, { turn: 3, kind: "ready" }, at));
+  snap();
+  add(act(s, mafia[0] as string, { turn: 4, kind: "vote", target: "gus" }, at));
+  snap();
+  add(act(s, mafia[1] as string, { turn: 4, kind: "vote", target: "gus" }, at));
+  snap();
+  return steps;
+}
+
 describe("Mafia delta reads", () => {
   it("join up: a seat's deltas, in any split, are its whole view once", () => {
     const g = toNight(3);
@@ -88,6 +123,50 @@ describe("Mafia delta reads", () => {
     }
   });
 
+  it("a village seat's whole answer is the same whoever the mafia are", () => {
+    const a = twin(["ada", "bea"]);
+    const b = twin(["dot", "eve"]);
+    expect(a.map((x) => x.phase)).toEqual([
+      "day_talk",
+      "day_vote",
+      "day_vote",
+      "night_talk",
+      "night_talk",
+      "night_vote",
+      "night_vote",
+      "day_talk",
+    ]);
+    expect(b.map((x) => x.phase)).toEqual(a.map((x) => x.phase));
+    for (const [i, x] of a.entries()) {
+      const y = b[i] as (typeof b)[number];
+      for (const p of ["cal", "fay", "gus", null, "stranger"]) {
+        const same = (f: (w: typeof x) => unknown) =>
+          expect(JSON.stringify(f(y))).toBe(JSON.stringify(f(x)));
+        same((w) => view(w.s, w.log, p));
+        for (const after of [null, 0, 2, 5])
+          same((w) => delta(w.s, w.log, p, after));
+        const cursor = present(x.s, x.log, p, undefined).next;
+        expect(present(y.s, y.log, p, cursor).events).toEqual(
+          present(x.s, x.log, p, cursor).events,
+        );
+      }
+    }
+  });
+
+  it("binds a cursor to its match: the same seat's cursor elsewhere resyncs", () => {
+    const g = toNight(2);
+    const other = { ...g.s, id: "m_anothermatchx" };
+    for (const p of [...seven, null]) {
+      const whole = present(g.s, g.log, p, undefined);
+      expect(present(g.s, g.log, p, whole.next).events).toEqual([]);
+      // The same events under another match's id: the same count would
+      // slice them to nothing, so only the binding gives the resync.
+      const elsewhere = present(other, g.log, p, whole.next);
+      expect(elsewhere.resync).toBe(true);
+      expect(elsewhere.events).toEqual(whole.events);
+    }
+  });
+
   it("a seat's cursor never reaches another seat's events", () => {
     const g = toNight(4);
     const villager = "cal";
@@ -117,7 +196,7 @@ describe("Mafia delta reads", () => {
     }
   });
 
-  it("forged and stale cursors resync the reader's own view", () => {
+  it("forged cursors resync the reader's own view; stale ones give what came since", () => {
     const g = toNight(4);
     const p = "dot";
     const own = view(g.s, g.log, p).events;

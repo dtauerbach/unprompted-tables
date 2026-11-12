@@ -98,9 +98,11 @@ the final seating stood, and the private share of talk.
 state without what never changes (rules, table, likes, the brief's words),
 and only the events the reader can see since its last read (`delta()` in
 `src/lib/floor/game.ts`). The cursor counts only that reader's visible
-events and is sealed to it (`packages/server/src/cursors.ts`), so it moves
-with nothing hidden from it, dinner's moment included; the twin-world
-tests compare delta reads too. After dinner a delta keeps the reader's own
+events and is sealed to it and its match (`packages/server/src/cursors.ts`),
+so it moves with nothing hidden from it, dinner's moment included; the
+twin-world tests compare delta reads too. Another reader's, another
+match's or a forged cursor gets a resync of the reader's whole view; an
+older cursor of its own gets everything since it was issued. After dinner a delta keeps the reader's own
 list; the whole read shows everything. Rooms (`/seating`) don't use it.
 `npm run measure:reads` plays a scripted floor both ways.
 

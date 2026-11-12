@@ -1,13 +1,15 @@
 import { cursorScope, openCursor, sealCursor } from "@unprompted-tables/server";
 import { describe, expect, it } from "vitest";
+import { present } from "../store";
 import { delta, EXECUTIVES, view } from "./game";
 import { floorMatch, ID, PLAYERS, QUICK, SEATINGS } from "./test-harness";
 
 // The open floor's delta read. Its cursor counts only the events a reader
 // can see, so private talk, sealed ballots and guesses between others
 // never move it or show through it; and a cursor is sealed to one reader
-// of one match, so another's, a forged one or a stale one gets the
-// reader's own whole view again, never anyone else's events.
+// of one match, so another reader's, another match's or a forged one gets
+// the reader's own whole view again, never anyone else's events. A stale
+// but genuine cursor gets everything since it was issued.
 
 const scope = (p: string | null) => cursorScope("dinner", ID, p);
 
@@ -46,6 +48,36 @@ describe("open floor delta reads", () => {
         const rest = changes(g.state, g.events, p, first.seen);
         expect([...first.view.events, ...rest.view.events]).toEqual(whole);
       }
+    }
+  });
+
+  it("binds a cursor to its match: the same reader's cursor elsewhere resyncs", () => {
+    const { g } = played();
+    const other = { ...g.state, id: "m_anothermatch" };
+    const opts = { now: new Date(g.state.opened) };
+    for (const p of [...PLAYERS, null]) {
+      const whole = present(g.state, g.events, p, opts, undefined) as {
+        next: string;
+        talk: unknown[];
+      };
+      const here = present(g.state, g.events, p, opts, whole.next) as {
+        events: unknown[];
+        resync?: true;
+      };
+      expect(here.resync).toBeUndefined();
+      expect(here.events).toEqual([]);
+      // The same events under another match's id: the same count would
+      // slice them to nothing, so only the binding gives the resync.
+      const elsewhere = present(other, g.events, p, opts, whole.next) as {
+        next: string;
+        resync?: true;
+      };
+      expect(elsewhere.resync).toBe(true);
+      // A resync is the whole view again, the talk and all.
+      const { next: _a, resync: _r, ...rest } = elsewhere;
+      const { next: _b, ...wholeRest } = whole;
+      expect(rest).toEqual({ ...wholeRest, id: other.id });
+      expect(whole.talk.length).toBeGreaterThan(0);
     }
   });
 
@@ -146,6 +178,11 @@ describe("open floor delta reads", () => {
     const after = changes(g.state, g.events, p, before.seen).view;
     expect(after.events.map((e) => e.kind)).toEqual(["served"]);
     expect(after.result).not.toBeNull();
+    // Served says which open motions dinner voided, as the result does.
+    expect(after.events[0]).toMatchObject({
+      kind: "served",
+      void: after.result?.void,
+    });
     // The whole read now shows everything, the private word included.
     expect(JSON.stringify(view(g.state, g.events, p))).toContain(SECRET);
     expect(JSON.stringify(after)).not.toContain(SECRET);
