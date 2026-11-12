@@ -347,7 +347,7 @@ it("refuses a seated cheat everything off the page", async () => {
     seating("/name", { code, body: { guest: "Blake", guess: 1 } }),
     "POST",
   );
-  for (const p of ["/record", "/record.md", "/seats", "/guide/../tick", "/x"])
+  for (const p of ["/record", "/record.md", "/seats", "/x", "/tick/x"])
     await expectHidden(seating(p, { code }));
   await expectHidden(seating("", { code, method: "PUT" }), "PUT");
   // A seat code isn't a session anywhere else on the Table.
