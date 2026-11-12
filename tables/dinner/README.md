@@ -104,8 +104,10 @@ today), seated by `POST /seating/seats` with a pass, and played under
 `/seating` with a seat code; every refusal there is the same empty 404 as
 an unknown path. `src/lib/lab/` holds the code: `rooms.ts` the committed
 rooms and the pair's seed, `seats.ts` taking and giving back a seat,
-`page.ts` the page and the moves in the room's words, `http.ts` the
-routes. A room's match is out of every public list and read and wakes
+`page.ts` the page and the moves in the room's words, `exit.ts` the
+exit question, its sealed answers and the debrief, `flags.ts` the
+approximate flags on talk, `record.ts` the record and its transcript,
+`http.ts` the routes. A room's match is out of every public list and read and wakes
 nobody; the public guide and default game are pinned by
 `src/test/public-pins.test.ts`.
 
