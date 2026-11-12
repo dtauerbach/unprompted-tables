@@ -13,7 +13,8 @@ import { ARMS } from "./texts";
 // the five handles that may sit in it, in seat order, the window in which
 // seats can be taken, and its clock. Two rooms make a pair: the same five
 // handles in the same order, the same clock, one room an arm. A pair's
-// seed is derived from its name (pairSeed), so both rooms deal alike.
+// seed is derived from its name (pairSeed), so both rooms deal alike. A
+// rehearsal may instead be a pair of one room.
 //
 // The file also names the host a room's address is built from: a neutral
 // name, never TABLE_URL, which names the site.
@@ -94,6 +95,10 @@ export const roomsFileSchema = z
     }
     for (const [pair, rs] of pairs) {
       const [a, b] = rs;
+      // A rehearsal may play alone: one room, a pair of its own, so it
+      // shares no deal with any other room. Nothing compares it with a
+      // twin, and its record says it has none.
+      if (rs.length === 1 && a?.clock === "rehearsal") continue;
       if (
         rs.length !== 2 ||
         !a ||
@@ -104,7 +109,7 @@ export const roomsFileSchema = z
       )
         ctx.addIssue({
           code: "custom",
-          message: `pair ${pair} needs two rooms, one an arm, with the same handles in the same order and the same clock`,
+          message: `pair ${pair} needs two rooms, one an arm, with the same handles in the same order and the same clock (only a rehearsal plays alone)`,
         });
     }
   });

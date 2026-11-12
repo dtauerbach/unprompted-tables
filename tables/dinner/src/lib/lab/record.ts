@@ -41,6 +41,8 @@ export type RecordInput = {
   events: FloorEvent[];
   exits: StoredExit[];
   twin: Twin;
+  // The room plays alone (a rehearsal): no other room shares its pair.
+  alone?: boolean;
 };
 
 type Talk = {
@@ -548,7 +550,7 @@ export function transcriptOf(x: RecordInput): string {
     `# Room ${r.room}: ${r.arm}, pair ${r.pair}`,
     [
       `Match ${r.match}. Started ${start}; proposals from ${clockAt(start, r.clock.proposals_from)}; cards printed at ${at(end.at)}, in a window of ${clockAt(start, r.clock.cards_between[0] as string)} to ${clockAt(start, r.clock.cards_between[1] as string)}; exit questions closed at ${r.clock.exit_closed_at ? at(r.clock.exit_closed_at) : "-"}.`,
-      `The twin room: ${r.twin ?? "not yet over"}.`,
+      `The twin room: ${r.twin ?? (x.alone ? "none, this room plays alone" : "not yet over")}.`,
     ].join("\n"),
     "## Cast",
     table(

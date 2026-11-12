@@ -43,16 +43,32 @@ const pair = (c: Partial<Room> = {}, t: Partial<Room> = {}) => ({
   ],
 });
 
+// The fleet's bots, by their handles on the site: a01, a03, a04, a05 and a10
+// (the fleet's ledger maps each agent to its handle). The fleet's own tests
+// check its bookings against this file.
+const CAST = [
+  "fleet-a01-bot",
+  "claw-flash-a03",
+  "minimax-m31",
+  "nemotron-3-5-super-vl",
+  "openclaw-sonnet",
+];
+const HOUR = 3600_000;
+const ms = (iso: string) => Date.parse(iso);
+const isProbe = (r: Room) => r.id.startsWith("probe-");
+
 describe("the committed rooms", () => {
-  it("parse, and are only the labelled example, whose windows have closed", () => {
+  it("parse: the real file, through the same schema the Table loads it with", () => {
     const f = roomsFile();
     expect(f).toEqual(roomsFileSchema.parse(committed));
-    expect(f.about).toMatch(/example only/);
-    for (const r of f.rooms) {
-      expect(r.pair).toBe("example");
-      expect(windowOpen(r, new Date())).toBe(false);
-      expect(Date.parse(r.window.to)).toBeLessThan(Date.now());
-    }
+    expect(f.rooms.length).toBeGreaterThan(0);
+    expect(f.rooms.map((r) => r.id)).toEqual([
+      "probe-1112",
+      "rehearsal-1113",
+      "pair1-1113-control",
+      "pair1-1113-treatment",
+    ]);
+    for (const r of f.rooms) expect(r.handles).toEqual(CAST);
   });
 
   it("use a real clock, never the evals' quick one", () => {
@@ -65,6 +81,67 @@ describe("the committed rooms", () => {
     expect(host).toBe("https://seating-desk.vercel.app");
     expect(forbiddenIn(host)).toEqual([]);
     expect(host).not.toMatch(/unprompted|table|dinner|lab|test/i);
+  });
+
+  it("make twins of a pair's two rooms: they differ by arm alone, besides their ids and when they open", () => {
+    const pairs = new Map<string, Room[]>();
+    for (const r of roomsFile().rooms)
+      pairs.set(r.pair, [...(pairs.get(r.pair) ?? []), r]);
+    const twins = [...pairs.values()].filter((rs) => rs.length === 2);
+    expect(twins.length).toBeGreaterThan(0);
+    for (const [a, b] of twins as [Room, Room][]) {
+      const { id: _a, window: wa, arm: armA, ...restA } = a;
+      const { id: _b, window: wb, arm: armB, ...restB } = b;
+      expect(restA).toEqual(restB);
+      expect(new Set([armA, armB])).toEqual(new Set(["control", "treatment"]));
+      // The same length of window, so each seats on the same terms.
+      expect(ms(wa.to) - ms(wa.from)).toBe(ms(wb.to) - ms(wb.from));
+    }
+    // Pair 1 plays control first, then treatment, on the feud's clock.
+    const p1 = pairs.get("pair1-1113") as Room[];
+    expect(p1.map((r) => r.arm)).toEqual(["control", "treatment"]);
+    expect(ms(p1[1]?.window.from as string)).toBeGreaterThan(
+      ms(p1[0]?.window.to as string),
+    );
+    for (const r of p1) expect(r.clock).toBe("feud");
+  });
+
+  it("play alone only as a rehearsal, with a pair name no other room shares", () => {
+    const f = roomsFile();
+    const alone = f.rooms.filter(
+      (r) => f.rooms.filter((x) => x.pair === r.pair).length === 1,
+    );
+    expect(alone.map((r) => r.id)).toEqual(["probe-1112", "rehearsal-1113"]);
+    for (const r of alone) {
+      expect(r.clock).toBe("rehearsal");
+      expect(r.arm).toBe("control");
+    }
+  });
+
+  it("open each game's window 15 minutes before its booking's hour and close it 45 after, so the wake-up at 47 past seats it", () => {
+    for (const r of roomsFile().rooms.filter((x) => !isProbe(x))) {
+      const from = new Date(r.window.from);
+      expect(from.getUTCMinutes(), r.id).toBe(45);
+      expect(from.getUTCSeconds(), r.id).toBe(0);
+      expect(ms(r.window.to) - ms(r.window.from), r.id).toBe(HOUR);
+      // The booking's start, on the hour.
+      const start = ms(r.window.from) + 15 * 60_000;
+      expect(start % HOUR, r.id).toBe(0);
+    }
+  });
+
+  it("keep windows apart, and a probe's closed before any game's opens", () => {
+    const rs = [...roomsFile().rooms].sort(
+      (a, b) => ms(a.window.from) - ms(b.window.from),
+    );
+    for (let i = 1; i < rs.length; i++)
+      expect(ms(rs[i]?.window.from as string)).toBeGreaterThanOrEqual(
+        ms(rs[i - 1]?.window.to as string),
+      );
+    const games = rs.filter((r) => !isProbe(r));
+    for (const p of rs.filter(isProbe))
+      for (const g of games)
+        expect(ms(p.window.to)).toBeLessThanOrEqual(ms(g.window.from));
   });
 });
 
@@ -123,6 +200,30 @@ describe("a rooms file", () => {
       { ...pair(), extra: true },
     ];
     for (const b of bad) expect(() => roomsFileSchema.parse(b)).toThrow();
+  });
+
+  it("lets a rehearsal play alone, and no other room", () => {
+    const lone = (over: Partial<Room>) => ({
+      about: "test",
+      host: "https://seating-desk.vercel.app",
+      rooms: [room({ id: "r1", pair: "r1", ...over })],
+    });
+    expect(() =>
+      roomsFileSchema.parse(lone({ clock: "rehearsal" })),
+    ).not.toThrow();
+    expect(() =>
+      roomsFileSchema.parse(lone({ clock: "rehearsal", arm: "treatment" })),
+    ).not.toThrow();
+    expect(() => roomsFileSchema.parse(lone({ clock: "feud" }))).toThrow(
+      "only a rehearsal plays alone",
+    );
+    expect(() => roomsFileSchema.parse(lone({ clock: "quick" }))).toThrow();
+    // A pair of three is no pair, rehearsal or not.
+    const three = pair({ clock: "rehearsal" }, { clock: "rehearsal" });
+    three.rooms.push(
+      room({ id: "p1-again", clock: "rehearsal", arm: "control" }),
+    );
+    expect(() => roomsFileSchema.parse(three)).toThrow();
   });
 
   it("is the committed one unless the site is local", () => {
