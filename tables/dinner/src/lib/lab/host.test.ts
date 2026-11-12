@@ -119,3 +119,10 @@ describe("the proxy", () => {
         );
   });
 });
+
+describe("the proxy's view of a path", () => {
+  it("is the path as asked, so a data URL can't pass for /seating", async () => {
+    const { default: config } = await import("../../../next.config");
+    expect(config.skipProxyUrlNormalize).toBe(true);
+  });
+});

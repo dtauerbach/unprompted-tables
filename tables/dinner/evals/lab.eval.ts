@@ -309,7 +309,16 @@ function rawGet(
 
 it("answers only /seating on the rooms' host, and everything as ever on the ordinary one", async () => {
   const roomHost = new URL(ROOM).host;
-  const paths = [...PUBLIC, "/v1/me", "/v1/matches/m_nowhere", "/favicon.ico"];
+  const paths = [
+    ...PUBLIC,
+    "/v1/me",
+    "/v1/matches/m_nowhere",
+    "/favicon.ico",
+    // Paths Next would otherwise fold into /seating before the proxy.
+    "/_next/data/x/seating.json",
+    "/_next/data/x/seating/guide.json",
+    "/_next/data/x/index.json",
+  ];
   for (const p of paths) {
     await expectHidden(send(`${ROOM}${p}`));
     await expectHidden(send(`${ROOM}${p}`, { method: "HEAD" }), "HEAD");
