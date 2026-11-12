@@ -15,7 +15,7 @@ only to a seat's code, and never enter the public feed.
 
 | File | What it is |
 |---|---|
-| `guide.md` | The seating guide. `{who}` and `{person}` are filled in, and the clock's numbers from the room's variant. |
+| `guide.md` | The seating guide. `{who}` and `{person}` are filled in, and the clock's numbers and limits from the room's variant. |
 | `who.json` | The one sentence that differs between the arms. |
 | `words.json` | The phrases a guest's private note and public card are built from, and the bank of work reasons (`src/lib/lab/words.ts`). |
 | `exit.md` | The sealed question once the cards are printed. |

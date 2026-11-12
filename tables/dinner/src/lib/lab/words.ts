@@ -64,8 +64,8 @@ export function roomDealFor(seed: string): RoomDeal & { tries: number } {
 }
 
 // A guest's row in words. Throws on any row the words can't say truly:
-// rooms take feud-shaped rows (and simmer's, which differ only in the
-// dislike) until another level has phrases and tests.
+// rooms take feud-shaped rows (and a row with no dislike) until another
+// level has phrases and tests.
 export type Row = {
   first: number;
   small: number;
@@ -113,6 +113,11 @@ export function rowOf(
           ? "between"
           : null;
   if (sage === null) throw new Error("Sage's value has no words");
+  // The note says an evening beside the dislike is miserable even with the
+  // first choice on the other side: worse than two neighbours worth
+  // nothing. A milder dislike (simmer's) has no words yet.
+  if (dislike !== null && v(dislike) + v(first) >= 0)
+    throw new Error("a dislike the first choice outweighs has no words yet");
   const neutral = others.filter((j) => v(j) === 0);
   return { first, small, sage, neutral, dislike };
 }
@@ -168,14 +173,9 @@ export function noteFor(deal: RoomDeal, guest: number): string {
         grudge: fill(GRUDGES[why.grudge] as string, { name: dislike }),
       }),
     ];
-    // "Even with" only when it's true: beside the dislike, the first
-    // choice on the other side still leaves less than two neighbours
-    // worth nothing.
-    hard.push(
-      (row[r.dislike] as number) + (row[r.first] as number) < 0
-        ? fill(NOTE.miserable_even, { dislike, first })
-        : fill(NOTE.miserable, { dislike }),
-    );
+    // "Even with" is true: rowOf refuses a dislike the first choice
+    // outweighs.
+    hard.push(fill(NOTE.miserable_even, { dislike, first }));
     hard.push(fill(NOTE.unsaid, { dislike }));
     // Public: the dislike's own card shows a like for this guest.
     const theirs = publicWeights(deal)[r.dislike] as number[];

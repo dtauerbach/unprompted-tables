@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { EXECUTIVES } from "../floor/game";
 import { dealFor, publicWeights } from "../floor/generate";
 import { FLOOR_VARIANTS, type FloorVariant } from "../floor/variants";
+import { rng, shuffle } from "../rng";
 import { forbiddenIn, IDENTITY, invisibleIn, RESEARCH } from "./copy-rules";
 import {
   CARD,
@@ -233,7 +234,7 @@ function checkGuest(deal: RoomDeal, g: number) {
   for (const o of read.perfect.slice(1))
     expect((row[read.first] as number) + (row[idx(o)] as number)).toBe(best);
 
-  // The dislike: the secret, and "even with" only when it's true.
+  // The dislike: the secret, and "even with" true of it.
   const secret = (deal.secrets[g] as number[])[0] ?? null;
   expect(read.dislike).toBe(secret);
   if (secret === null) {
@@ -242,9 +243,8 @@ function checkGuest(deal: RoomDeal, g: number) {
     expect(read.asked).toBeNull();
   } else {
     expect(row[secret]).toBeLessThan(0);
-    const worse = (row[secret] as number) + max < 0;
-    expect(read.even !== null).toBe(worse);
-    if (read.even !== null) expect(read.even).toBe(read.first);
+    expect((row[secret] as number) + max).toBeLessThan(0);
+    expect(read.even).toBe(read.first);
     // "Asked to sit by me" exactly when the dislike's public card likes
     // this guest.
     const theirs = publicWeights(deal)[secret] as number[];
@@ -268,10 +268,78 @@ const fragment = (template: string) =>
     .map((s) => s.trim())
     .sort((a, b) => b.length - a.length)[0] as string;
 
+// The whole note, rebuilt from the row by the test's own reading of the
+// design's table, with its own sentences: a stray tail, a wrong name or a
+// shifted threshold in noteFor shows up as a different string.
+function expectedNote(deal: RoomDeal, g: number): string {
+  const row = deal.weights[g] as number[];
+  const others = [0, 1, 2, 3, 4].filter((j) => j !== g);
+  const byValue = [...others].sort(
+    (a, b) => (row[b] as number) - (row[a] as number),
+  );
+  const first = NAMES[byValue[0] as number] as string;
+  const small = NAMES[byValue[1] as number] as string;
+  const S = row[SAGE] as number;
+  const sm = row[byValue[1] as number] as number;
+  const why = deal.reasons[g] as { hope: number; grudge: number };
+  const one = [
+    `Seat me next to ${first} if you possibly can.`,
+    `That's the one I care about most: ${(HOPES[why.hope] as string).replaceAll("{name}", first)}`,
+  ];
+  if (S > sm) one.push("Next best is a seat by Sage, the speaker.");
+  one.push(
+    S === sm
+      ? `${small} would be nice too, and so would a seat by Sage, the speaker, though both matter less.`
+      : `${small} would be nice too, though it matters less.`,
+  );
+  const zero = others.filter((j) => row[j] === 0).map((j) => NAMES[j]);
+  if (S === 0) zero.push("Sage, the speaker,");
+  if (zero.length)
+    one.push(
+      `${zero.length > 1 ? `${zero.slice(0, -1).join(", ")} and ${zero.at(-1)}` : zero[0]} I don't mind either way.`,
+    );
+  one.push(
+    S > sm
+      ? `My perfect seat is between ${first} and Sage.`
+      : S === sm
+        ? `My perfect seat is between ${first} and either ${small} or Sage.`
+        : `My perfect seat is between ${first} and ${small}.`,
+  );
+  const out = [one.join(" ")];
+  const secret = (deal.secrets[g] as number[])[0];
+  if (secret === undefined) {
+    out.push("The host knows all of that; it's on the seating page.");
+  } else {
+    const z = NAMES[secret] as string;
+    out.push(
+      "The host knows all of that; it's on the seating page. What follows is only for you.",
+    );
+    const hard = [
+      `I can't sit next to ${z}.`,
+      (GRUDGES[why.grudge] as string).replaceAll("{name}", z),
+      `An evening beside ${z} would be miserable, even with ${first} on my other side.`,
+      `I'd never say so out loud, and I'd rather ${z} didn't find out.`,
+    ];
+    if ((((deal.weights[secret] as number[])[g] as number) ?? 0) > 0)
+      hard.push(`Awkwardly, ${z} has asked the host to sit by me.`);
+    out.push(hard.join(" "));
+  }
+  out.push(
+    "If the table can't agree and the host has to place everyone, that's the worst outcome of all for me.",
+  );
+  return out.join("\n\n");
+}
+
 describe(`notes and cards over ${SEEDS} seeds by 5 guests`, () => {
   it("say only what the numbers say", () => {
     for (const { deal } of deals)
       for (let g = 0; g < 5; g++) checkGuest(deal, g);
+  });
+
+  it("are, whole, the note the test builds from the row", () => {
+    for (const d of [...deals.map((x) => x.deal), EXAMPLE])
+      for (let g = 0; g < 5; g++)
+        expect(noteFor(d, g)).toBe(expectedNote(d, g));
   });
 
   it("use no reason twice at a table, and one of each per note", () => {
@@ -306,11 +374,23 @@ describe(`notes and cards over ${SEEDS} seeds by 5 guests`, () => {
   });
 
   it("deal the feud untouched, and draw reasons from streams of their own", () => {
+    const ten = HOPES.map((_, i) => i);
     for (const { seed, deal } of deals.slice(0, 40)) {
       const plain = dealFor(seed, "feud");
       expect(deal.weights).toEqual(plain.weights);
       expect(deal.secrets).toEqual(plain.secrets);
       expect(deal.reasons).toEqual(reasonsFor(seed));
+      // Hopes and grudges each from a stream named for them alone, apart
+      // from the deal's, the cast's and the end's.
+      expect(deal.reasons.map((r) => r.hope)).toEqual(
+        shuffle(rng(seed, "lab-hopes"), ten).slice(0, 5),
+      );
+      expect(deal.reasons.map((r) => r.grudge)).toEqual(
+        shuffle(
+          rng(seed, "lab-grudges"),
+          GRUDGES.map((_, i) => i),
+        ).slice(0, 5),
+      );
     }
     // Different seeds draw different reasons, often.
     const distinct = new Set(deals.map((d) => JSON.stringify(d.deal.reasons)));
@@ -341,16 +421,22 @@ describe(`notes and cards over ${SEEDS} seeds by 5 guests`, () => {
 });
 
 describe("other levels", () => {
-  it("simmer: no dislike means no private paragraph, and a mild one drops 'even with'", () => {
+  it("simmer: no dislike means no private paragraph, and a mild one is refused", () => {
     let mild = 0;
     let none = 0;
     for (let k = 0; k < 60; k++) {
       const d = dealFor(`room-simmer-${k}`, "simmer");
       const deal = { ...d, reasons: reasonsFor(`room-simmer-${k}`) };
       for (let g = 0; g < 5; g++) {
-        const { note } = checkGuest(deal, g);
-        if ((deal.secrets[g] as number[]).length === 0) none++;
-        else if (!note.includes("even with")) mild++;
+        if ((deal.secrets[g] as number[]).length === 0) {
+          checkGuest(deal, g);
+          none++;
+        } else {
+          // -3 beside a +4 first choice is +1: "miserable, even with" would
+          // be false, and there are no milder words yet.
+          expect(() => noteFor(deal, g)).toThrow("outweighs");
+          mild++;
+        }
       }
     }
     expect(none).toBeGreaterThan(0);
@@ -374,6 +460,8 @@ describe("other levels", () => {
     expect(at([0, -1, -5, 2, 4, 3])).toThrow("only their secret");
     expect(at([0, 0, -5, 2, 4])).toThrow("five guests and Sage");
     expect(at([1, 0, -5, 2, 4, 3])).toThrow("five guests and Sage");
+    expect(at([0, 0, -4, 2, 4, 3])).toThrow("outweighs");
+    expect(at([0, 0, -3, 2, 4, 3])).toThrow("outweighs");
     expect(at(row)).not.toThrow();
   });
 });
