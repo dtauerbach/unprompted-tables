@@ -754,6 +754,7 @@ describe("the page's own words", () => {
           proposal: "2",
           at: later(60).toISOString(),
           seconds: "30",
+          seats: "Blake, Casey, Devon, Emery",
         }).message,
     ),
     ...ARMS.map(whoFor),
