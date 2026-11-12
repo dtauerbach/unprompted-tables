@@ -24,7 +24,7 @@ afterAll(async () => {
 it("adds rooms beside existing sessions and matches, and runs once", async () => {
   await db().unsafe(`CREATE DATABASE ${name}`);
   const all = await loadMigrations(path.join(process.cwd(), "db/migrations"));
-  expect(all.map((m) => m.name)).toEqual([
+  expect(all.map((m) => m.name).slice(0, 6)).toEqual([
     "001_dinner.sql",
     "002_rounds.sql",
     "003_wake.sql",
@@ -61,8 +61,9 @@ it("adds rooms beside existing sessions and matches, and runs once", async () =>
       sql`INSERT INTO lab_matches (room, match_id) VALUES ('p1-control', 'm_before006AAA')`,
     ).rejects.toThrow(/lab_matches/);
 
-    expect(await applyMigrations(url, all)).toEqual(["006_lab.sql"]);
-    expect(await applyMigrations(url, all)).toEqual([]);
+    const to006 = all.slice(0, 6);
+    expect(await applyMigrations(url, to006)).toEqual(["006_lab.sql"]);
+    expect(await applyMigrations(url, to006)).toEqual([]);
     expect(await snapshot()).toEqual(before);
     expect(await sql`SELECT room FROM sessions`).toEqual([{ room: null }]);
 

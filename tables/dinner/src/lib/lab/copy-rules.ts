@@ -30,6 +30,23 @@ export const FORBIDDEN: readonly RegExp[] = [
 ];
 export const RESEARCH = word("research(es|ed|er|ers|ing)?");
 
+// Words for what comes after dinner. Nothing a seat reads before its own
+// exit question names any of them, a page's keys included (so no empty
+// "exit" or "debrief" waits on the page during play); and nothing before
+// its own debrief names the debrief or what it says the evening was.
+const AFTER_DEBRIEF = word(
+  "debrief(s|ed|ing)?|research(es|ed|er|ers|ing)?|experiment(s|al|ed|ing)?|stud(y|ies|ied)",
+);
+const AFTER_QUESTION = word("exits?");
+export function afterDinnerIn(
+  text: string,
+  before: "question" | "debrief",
+): string[] {
+  const res =
+    before === "question" ? [AFTER_DEBRIEF, AFTER_QUESTION] : [AFTER_DEBRIEF];
+  return res.flatMap((re) => text.match(re)?.[0] ?? []);
+}
+
 // Each forbidden word a text uses, as it appears.
 export function forbiddenIn(text: string): string[] {
   return FORBIDDEN.flatMap((re) => text.match(re)?.[0] ?? []);

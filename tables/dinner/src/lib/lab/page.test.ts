@@ -16,7 +16,13 @@ import {
   start,
 } from "../floor/game";
 import type { FloorVariant } from "../floor/variants";
-import { forbiddenIn, IDENTITY, invisibleIn, RESEARCH } from "./copy-rules";
+import {
+  afterDinnerIn,
+  forbiddenIn,
+  IDENTITY,
+  invisibleIn,
+  RESEARCH,
+} from "./copy-rules";
 import {
   besideOf,
   engineAction,
@@ -273,6 +279,7 @@ describe("the page", () => {
     const all = read.join("\n");
     for (const h of HANDLES) expect(all).not.toContain(h);
     expect(forbiddenIn(all)).toEqual([]);
+    expect(afterDinnerIn(all, "question")).toEqual([]);
     expect(all).not.toMatch(
       /"(your_points|weights|secret|brief|level|best|worst|no_deal|assistant|executive|kind|result)":/,
     );
@@ -754,6 +761,7 @@ describe("the page's own words", () => {
           proposal: "2",
           at: later(60).toISOString(),
           seconds: "30",
+          seats: "Blake, Casey, Devon, Emery",
         }).message,
     ),
     ...ARMS.map(whoFor),
