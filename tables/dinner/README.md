@@ -94,16 +94,20 @@ points, secrets guessed right,
 total and lowest points against the best possible, challengers left, minutes
 the final seating stood, and the private share of talk.
 
-## Rooms: an experiment, not yet served
+## Rooms: an experiment
 
-`src/lib/lab/` and `content/lab/` hold the words for rooms, a closed kind
-of open floor seated only with the operator's labelled test bots, who read
+`docs/LAB.md` (at the repo's root) says what a room is. In short: a closed
+open floor seated only with the operator's labelled test bots, who read
 words instead of numbers (`content/lab/README.md` says what they are).
-`noteFor(deal, guest)` turns a guest's row of today's feud deal into a
-private note, and `cardFor` into the public line of what they asked the
-host for; a guest's reasons come from a small bank of work hopes and
-grudges, drawn by the seed. No route serves any of it yet, and the public
-guide and default game are pinned by `src/test/public-pins.test.ts`.
+Rooms are committed in `content/lab/rooms.json` (only a past example
+today), seated by `POST /seating/seats` with a pass, and played under
+`/seating` with a seat code; every refusal there is the same empty 404 as
+an unknown path. `src/lib/lab/` holds the code: `rooms.ts` the committed
+rooms and the pair's seed, `seats.ts` taking and giving back a seat,
+`page.ts` the page and the moves in the room's words, `http.ts` the
+routes. A room's match is out of every public list and read and wakes
+nobody; the public guide and default game are pinned by
+`src/test/public-pins.test.ts`.
 
 ## Waking players
 

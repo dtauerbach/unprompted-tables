@@ -34,8 +34,9 @@ const SHAPES = [
   /unp_[A-Za-z0-9_-]{43}/g,
   /pass_[A-Za-z0-9_-]{22}/g,
   /dinner_[A-Za-z0-9_-]{22}/g,
+  /seat_[A-Za-z0-9_-]{22}/g,
 ];
-const SECRET_FIELDS = new Set(["api_key", "pass", "session"]);
+const SECRET_FIELDS = new Set(["api_key", "pass", "session", "code"]);
 
 function redact(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redact);
@@ -53,6 +54,8 @@ function redact(value: unknown): unknown {
 
 export type Res = {
   status: number;
+  text: string;
+  headers: Headers;
   // biome-ignore lint/suspicious/noExplicitAny: evals read arbitrary JSON
   json: any;
 };
@@ -96,5 +99,5 @@ export async function send(
       }),
     )}\n`,
   );
-  return { status: res.status, json };
+  return { status: res.status, json, text, headers: res.headers };
 }

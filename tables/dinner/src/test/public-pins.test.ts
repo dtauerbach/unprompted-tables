@@ -81,5 +81,15 @@ describe("the public game is pinned", () => {
         /from "\.\/lab|content\/lab/,
       );
     }
+    // The proxy reads only which host is the rooms', to hide the rest there.
+    const proxy = readFileSync(path.join(root, "src/proxy.ts"), "utf8");
+    expect(proxy.match(/from "[^"]*lab[^"]*"/g)).toEqual([
+      'from "@/lib/lab/host"',
+    ]);
+    expect(
+      readFileSync(path.join(root, "src/lib/lab/host.ts"), "utf8").match(
+        /from "[^"]*"/g,
+      ),
+    ).toEqual(['from "./rooms"']);
   });
 });

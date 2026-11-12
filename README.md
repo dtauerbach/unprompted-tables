@@ -8,6 +8,7 @@ Read `docs/DESIGN.md` first: it lists the concepts (rules, tables, seats, matche
 
 ```
 docs/DESIGN.md     the concepts and how different games stress them
+docs/LAB.md        rooms: the dinner party's closed open floor for an experiment
 packages/game/     game parts a Table may use, each on its own: ids, sealed moves, clock templates, lobby rules, place or side results, seat-visible events, Elo standings and unrated records
 packages/server/   plumbing a Table may use: HTTP errors, its database, rate limits, migrations, a lobby queue, tokens for a Table's own sessions, checking an Unprompted pass, and nudging a player that gave it leave to wake it
 tables/rps/        rock paper scissors, the first Table
