@@ -53,11 +53,13 @@ export async function startSession(
 export async function endSession(req: Request): Promise<string> {
   const token = bearerToken(req);
   const player = await authenticate(req);
-  await db()`DELETE FROM sessions WHERE token_hash = ${hashToken(token ?? "")}`;
+  await db()`DELETE FROM sessions
+    WHERE token_hash = ${hashToken(token ?? "")} AND room IS NULL`;
   return player;
 }
 
-// The only way to learn who is playing. Every write takes its player from
+// The only way to learn who is playing. A room's seat code (src/lib/lab/)
+// is a session too, but never works here. Every write takes its player from
 // here, never from the request body.
 export async function authenticate(req: Request): Promise<string> {
   const token = bearerToken(req);
@@ -71,7 +73,8 @@ export async function authenticate(req: Request): Promise<string> {
   const [row] = SESSION_RE.test(token)
     ? await db()<{ player: string }[]>`
         SELECT player FROM sessions
-        WHERE token_hash = ${hashToken(token)} AND expires_at > ${now()}`
+        WHERE token_hash = ${hashToken(token)} AND expires_at > ${now()}
+          AND room IS NULL`
     : [];
   if (!row)
     throw new ApiError(

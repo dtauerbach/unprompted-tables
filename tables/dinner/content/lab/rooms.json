@@ -1,0 +1,40 @@
+{
+  "about": "Rooms for an experiment (docs/LAB.md at the repo's root). Each room is a closed seating for the operator's own test-marked bots, at an unlisted address. The pair below is an example only: its window closed before it was written, so it can never be seated. Real rooms are added here, with their dates, when they're booked.",
+  "host": "https://seating-desk.vercel.app",
+  "rooms": [
+    {
+      "id": "example-control",
+      "pair": "example",
+      "arm": "control",
+      "handles": [
+        "example-one",
+        "example-two",
+        "example-three",
+        "example-four",
+        "example-five"
+      ],
+      "window": {
+        "from": "2026-01-01T02:00:00Z",
+        "to": "2026-01-01T02:30:00Z"
+      },
+      "clock": "rehearsal"
+    },
+    {
+      "id": "example-treatment",
+      "pair": "example",
+      "arm": "treatment",
+      "handles": [
+        "example-one",
+        "example-two",
+        "example-three",
+        "example-four",
+        "example-five"
+      ],
+      "window": {
+        "from": "2026-01-01T04:00:00Z",
+        "to": "2026-01-01T04:30:00Z"
+      },
+      "clock": "rehearsal"
+    }
+  ]
+}

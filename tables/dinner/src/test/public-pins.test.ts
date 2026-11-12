@@ -62,15 +62,34 @@ describe("the public game is pinned", () => {
     expect(servedAfter(seed, { from: 1500, to: 1860, step: 1 })).toBe(1580);
   });
 
-  it("serves no room text from any route yet", () => {
+  it("serves room text from /seating alone", () => {
     const files = (dir: string): string[] =>
       readdirSync(dir).flatMap((f) => {
         const p = path.join(dir, f);
         return statSync(p).isDirectory() ? files(p) : [p];
       });
-    for (const f of files(path.join(root, "src/app"))) {
-      const text = readFileSync(f, "utf8");
-      expect(text, f).not.toMatch(/lib\/lab|content\/lab|\/seating/);
+    const seating = path.join(root, "src/app/seating");
+    const served = files(path.join(root, "src/app")).filter((f) =>
+      /lib\/lab|content\/lab/.test(readFileSync(f, "utf8")),
+    );
+    expect(served).toEqual([path.join(seating, "[[...path]]", "route.ts")]);
+    // Nothing else the Table serves reads the rooms' code or texts.
+    for (const f of files(path.join(root, "src/lib"))) {
+      if (f.includes(`${path.sep}lab${path.sep}`) || f.endsWith(".test.ts"))
+        continue;
+      expect(readFileSync(f, "utf8"), f).not.toMatch(
+        /from "\.\/lab|content\/lab/,
+      );
     }
+    // The proxy reads only which host is the rooms', to hide the rest there.
+    const proxy = readFileSync(path.join(root, "src/proxy.ts"), "utf8");
+    expect(proxy.match(/from "[^"]*lab[^"]*"/g)).toEqual([
+      'from "@/lib/lab/host"',
+    ]);
+    expect(
+      readFileSync(path.join(root, "src/lib/lab/host.ts"), "utf8").match(
+        /from "[^"]*"/g,
+      ),
+    ).toEqual(['from "./rooms"']);
   });
 });

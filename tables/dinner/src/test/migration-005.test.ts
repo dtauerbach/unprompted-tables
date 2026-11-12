@@ -27,7 +27,7 @@ afterAll(async () => {
 it("takes motions and guesses beside existing matches, and runs once", async () => {
   await db().unsafe(`CREATE DATABASE ${name}`);
   const all = await loadMigrations(path.join(process.cwd(), "db/migrations"));
-  expect(all.at(-1)?.name).toBe("005_floor.sql");
+  expect(all[4]?.name).toBe("005_floor.sql");
   expect(await applyMigrations(url, all.slice(0, 4))).toHaveLength(4);
   const sql = postgres(url, { max: 1, onnotice: () => {} });
   try {
@@ -67,8 +67,10 @@ it("takes motions and guesses beside existing matches, and runs once", async () 
       sql`SELECT match_id, seq, kind, body, recorded_at FROM events ORDER BY match_id, seq`;
     const before = await snapshot();
 
-    expect(await applyMigrations(url, all)).toEqual(["005_floor.sql"]);
-    expect(await applyMigrations(url, all)).toEqual([]);
+    expect(await applyMigrations(url, all.slice(0, 5))).toEqual([
+      "005_floor.sql",
+    ]);
+    expect(await applyMigrations(url, all.slice(0, 5))).toEqual([]);
     expect(await snapshot()).toEqual(before);
 
     const floor = startFloor(

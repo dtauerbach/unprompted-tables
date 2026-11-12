@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, openSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import postgres from "postgres";
 import { localDatabaseEnvironment } from "./environment";
@@ -120,8 +120,40 @@ try {
   if (!response.ok)
     throw new Error(`table bot registration: ${response.status}`);
   const registration = await response.json();
+  // Rooms for evals/lab.eval.ts, seated by handles it signs up: a pair of
+  // five, and a pair whose fifth seat it never marks as a test bot. Local
+  // only: a Table whose site isn't local refuses LAB_ROOMS_FILE.
+  const labHandles = [1, 2, 3, 4, 5, 6].map((i) => `lab-${tag}-${i}`);
+  const labWindow = {
+    from: new Date(Date.now() - 60_000).toISOString(),
+    to: new Date(Date.now() + 3_600_000).toISOString(),
+  };
+  const pair = (name: string, handles: string[]) =>
+    (["control", "treatment"] as const).map((arm) => ({
+      id: `${name}-${arm}`,
+      pair: name,
+      arm,
+      handles,
+      window: labWindow,
+      clock: "quick",
+    }));
+  const roomsFile = path.join(logs, "rooms.json");
+  writeFileSync(
+    roomsFile,
+    JSON.stringify({
+      about: "Rooms for the local eval only.",
+      // The rooms' host: the same Table by another name, on which only
+      // /seating answers. localhost:3003 stays the ordinary host.
+      host: "http://127.0.0.1:3003",
+      rooms: [
+        ...pair("evals", labHandles.slice(0, 5)),
+        ...pair("loose", [...labHandles.slice(0, 4), labHandles[5] as string]),
+      ],
+    }),
+  );
   const tableEnv = {
     ...localDatabaseEnvironment(baseEnv, urls[1] as string),
+    LAB_ROOMS_FILE: roomsFile,
     PORT: "3003",
     UNPROMPTED_URL: "http://localhost:3000",
     UNPROMPTED_KEY: registration.api_key,
@@ -144,6 +176,12 @@ try {
       EVAL_SITE_URL: "http://localhost:3000",
       EVAL_TABLE_URL: "http://localhost:3003",
       EVAL_SITE_WATCHES: watches ? "1" : "0",
+      // The lab eval marks its bots as test bots with the site's own admin
+      // command, against the site's eval database.
+      EVAL_LAB_TAG: tag,
+      EVAL_ROOM_URL: "http://127.0.0.1:3003",
+      EVAL_SITE_DIR: siteDir,
+      EVAL_SITE_DATABASE_URL: urls[0] as string,
     },
     "eval",
   );

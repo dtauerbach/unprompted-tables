@@ -8,6 +8,7 @@ import {
 } from "@unprompted-tables/server";
 import { matchStartTime, now, tableNow } from "./clock";
 import { logFailure } from "./diagnostics";
+import type { FloorVariant } from "./floor/variants";
 import {
   advance,
   due,
@@ -42,6 +43,8 @@ async function loadEvents(tx: Tx, id: string): Promise<MatchEvent[]> {
   return rows.map((r) => r.body);
 }
 
+// room: whether this is a room's match (src/lib/lab/), which wakes nobody:
+// a room calls the site only to check a pass and a bot's public page.
 async function append(
   tx: Tx,
   id: string,
@@ -49,6 +52,7 @@ async function append(
   events: MatchEvent[],
   state: MatchState,
   actor: string | null,
+  room: boolean,
 ): Promise<void> {
   if (events.length === 0) return;
   for (const [i, e] of events.entries())
@@ -56,7 +60,8 @@ async function append(
       INSERT INTO events (match_id, seq, kind, body)
       VALUES (${id}, ${from + i}, ${e.body.kind}, ${tx.json(e)})`;
   // Wake the players these events need who let this Table wake them.
-  await choose(tx, id, wakesFor(state.players, events, kindOf(state)), actor);
+  if (!room)
+    await choose(tx, id, wakesFor(state.players, events, kindOf(state)), actor);
   const next = due(state);
   // Liveness is a rule decision, not the presence of a scheduled deadline.
   if (state.phase !== "over")
@@ -78,6 +83,13 @@ async function append(
 // at transaction start, bounded by the last recorded event, for new events.
 // actor is the player whose request this is, if any: it sees the result,
 // so the events don't wake it.
+//
+// scope says which matches a caller may reach. Every public route reads
+// "public", where a room's match is as missing as an unknown id; a room's
+// own routes read "room", where only a room's match is; the sweep reads
+// "any".
+export type Scope = "public" | "room" | "any";
+
 export async function withMatch<T>(
   id: string,
   fn: (
@@ -87,11 +99,14 @@ export async function withMatch<T>(
     at: Date,
   ) => Promise<{ events: MatchEvent[]; value: T }>,
   actor: string | null = null,
+  scope: Scope = "public",
 ): Promise<T> {
   if (!MATCH_ID_RE.test(id)) throw noSuchMatch(id);
   const value = await db().begin(async (tx) => {
-    const [row] = await tx`SELECT id FROM matches WHERE id = ${id} FOR UPDATE`;
-    if (!row) throw noSuchMatch(id);
+    const [row] = await tx<{ room: boolean }[]>`
+      SELECT EXISTS (SELECT 1 FROM lab_matches l WHERE l.match_id = m.id) AS room
+      FROM matches m WHERE m.id = ${id} FOR UPDATE OF m`;
+    if (!row || !inScope(row.room, scope)) throw noSuchMatch(id);
     const arrived = await tableNow(tx);
     const stored = await loadEvents(tx, id);
     // Lock acquisition order need not match transaction arrival order. Never
@@ -104,7 +119,15 @@ export async function withMatch<T>(
     const state = fold(replay(id, stored), late);
     const out = await fn(state, [...stored, ...late], tx, at);
     const added = [...late, ...out.events];
-    await append(tx, id, stored.length, added, fold(state, out.events), actor);
+    await append(
+      tx,
+      id,
+      stored.length,
+      added,
+      fold(state, out.events),
+      actor,
+      row.room,
+    );
     return out.value;
   });
   return value as T;
@@ -114,6 +137,9 @@ export async function withMatch<T>(
 // hold up the players. Only when a phase has run out does reading take the
 // lock and store the clock's events, and not when the Table is read-only:
 // then the closed phases show but aren't stored.
+const inScope = (room: boolean, scope: Scope) =>
+  scope === "any" || room === (scope === "room");
+
 export async function readMatch(
   id: string,
   player: string | null,
@@ -130,11 +156,14 @@ export async function seeMatch<T>(
   id: string,
   project: (state: MatchState, events: MatchEvent[], at: Date) => T,
   reader: string | null = null,
+  scope: Scope = "public",
 ): Promise<T> {
   if (!MATCH_ID_RE.test(id)) throw noSuchMatch(id);
   const seen = await db().begin(async (tx) => {
-    const [row] = await tx`SELECT id FROM matches WHERE id = ${id}`;
-    if (!row) throw noSuchMatch(id);
+    const [row] = await tx<{ room: boolean }[]>`
+      SELECT EXISTS (SELECT 1 FROM lab_matches l WHERE l.match_id = m.id) AS room
+      FROM matches m WHERE m.id = ${id}`;
+    if (!row || !inScope(row.room, scope)) throw noSuchMatch(id);
     const stored = await loadEvents(tx, id);
     const at = await tableNow(tx);
     const late = advance(replay(id, stored), at);
@@ -148,6 +177,7 @@ export async function seeMatch<T>(
         value: project(state, events, at),
       }),
       reader,
+      scope,
     );
   const { stored, late, at } = seen;
   return project(fold(replay(id, stored), late), [...stored, ...late], at);
@@ -165,10 +195,12 @@ export async function openMatchOf(
   tx: Tx,
   player: string,
 ): Promise<string | null> {
+  // A room's match isn't one the lobby or /v1/me knows of.
   const [row] = await tx<{ match_id: string }[]>`
-    SELECT match_id FROM open_matches
-    WHERE players @> ARRAY[${player}]::text[]
-    ORDER BY due LIMIT 1`;
+    SELECT o.match_id FROM open_matches o
+    WHERE o.players @> ARRAY[${player}]::text[]
+      AND NOT EXISTS (SELECT 1 FROM lab_matches l WHERE l.match_id = o.match_id)
+    ORDER BY o.due LIMIT 1`;
   return row?.match_id ?? null;
 }
 
@@ -181,7 +213,25 @@ export async function startMatch(
   const id = newMatchId();
   const events = start(players, SETTINGS.variant, await matchStartTime(tx));
   await tx`INSERT INTO matches (id, players) VALUES (${id}, ${players})`;
-  await append(tx, id, 0, events, replay(id, events), by);
+  await append(tx, id, 0, events, replay(id, events), by, false);
+  return id;
+}
+
+// A room's match (src/lib/lab/): its players in the room's fixed order,
+// its clock and its pair's seed, and its row in lab_matches before any
+// event, so nothing it does wakes anyone.
+export async function startRoomMatch(
+  tx: Tx,
+  room: string,
+  players: string[],
+  variant: FloorVariant,
+  seed: string,
+): Promise<string> {
+  const id = newMatchId();
+  const events = start(players, variant, await matchStartTime(tx), seed);
+  await tx`INSERT INTO matches (id, players) VALUES (${id}, ${players})`;
+  await tx`INSERT INTO lab_matches (room, match_id) VALUES (${room}, ${id})`;
+  await append(tx, id, 0, events, replay(id, events), null, true);
   return id;
 }
 
@@ -195,10 +245,12 @@ export async function sweep(limit = 25): Promise<void> {
   );
   for (const row of stale) {
     try {
-      await withMatch(row.match_id, async () => ({
-        events: [],
-        value: undefined,
-      }));
+      await withMatch(
+        row.match_id,
+        async () => ({ events: [], value: undefined }),
+        null,
+        "any",
+      );
     } catch (error) {
       logFailure(error, "sweep_match", row.match_id);
       // Back off only this unchanged scheduling entry, so corrupt oldest
