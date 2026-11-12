@@ -1,4 +1,5 @@
 import {
+  afterParam,
   assertWritable,
   consume,
   json,
@@ -7,9 +8,9 @@ import {
 import { z } from "zod";
 import { route } from "@/lib/http";
 import { moveRules } from "@/lib/limits";
-import { act, fold, view } from "@/lib/rules";
+import { act, fold } from "@/lib/rules";
 import { authenticate } from "@/lib/sessions";
-import { withMatch } from "@/lib/store";
+import { present, withMatch } from "@/lib/store";
 import { markRead } from "@/lib/wake";
 
 // Every move either game takes; each match's own rules refuse the moves
@@ -56,6 +57,7 @@ export const POST = route(
   async (req, ctx: { params: Promise<{ id: string }> }) => {
     const player = await authenticate(req);
     assertWritable();
+    const after = afterParam(req);
     const action = await readJson(req, schema);
     return json(
       await withMatch(
@@ -67,9 +69,13 @@ export const POST = route(
           const events = act(state, player, action, at);
           return {
             events,
-            value: view(fold(state, events), [...history, ...events], player, {
-              now: at,
-            }),
+            value: present(
+              fold(state, events),
+              [...history, ...events],
+              player,
+              { now: at },
+              after,
+            ),
           };
         },
         player,

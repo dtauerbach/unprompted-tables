@@ -5,6 +5,7 @@ import {
   advance,
   apply,
   briefFor,
+  delta,
   EXECUTIVES,
   type FloorAction,
   type FloorDeal,
@@ -167,6 +168,19 @@ describe("twin worlds", () => {
           expect(y, `${who} at ${sec}`).toBe(x);
           for (const t of hidden)
             expect(x).not.toContain(later(t).toISOString());
+          // The delta read, and the count its cursor seals, from the start
+          // and from a few events back.
+          for (const after of [0, 3, 8]) {
+            const dx = JSON.stringify(
+              delta(a.state, a.events, who, after, { now }),
+            );
+            const dy = JSON.stringify(
+              delta(b.state, b.events, who, after, { now }),
+            );
+            expect(dy, `${who} delta ${after} at ${sec}`).toBe(dx);
+            for (const t of hidden)
+              expect(dx).not.toContain(later(t).toISOString());
+          }
           compared++;
         }
         for (const who of PLAYERS.slice(1)) {

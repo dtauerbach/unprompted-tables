@@ -1,4 +1,5 @@
 import {
+  afterParam,
   assertWritable,
   consume,
   json,
@@ -7,9 +8,9 @@ import {
 import { z } from "zod";
 import { route } from "@/lib/http";
 import { moveRules } from "@/lib/limits";
-import { act, apply, view } from "@/lib/match";
+import { act, apply } from "@/lib/match";
 import { authenticate } from "@/lib/sessions";
-import { withMatch } from "@/lib/store";
+import { present, withMatch } from "@/lib/store";
 
 import { validTalk } from "@/lib/text";
 
@@ -38,6 +39,7 @@ export const POST = route(
   async (req, ctx: { params: Promise<{ id: string }> }) => {
     const player = await authenticate(req);
     assertWritable();
+    const after = afterParam(req);
     const action = await readJson(req, schema);
     return json(
       await withMatch((await ctx.params).id, async (state, history, tx, at) => {
@@ -45,10 +47,11 @@ export const POST = route(
         const events = act(state, player, action, at);
         return {
           events,
-          value: view(
+          value: present(
             events.reduce(apply, state),
             [...history, ...events],
             player,
+            after,
           ),
         };
       }),

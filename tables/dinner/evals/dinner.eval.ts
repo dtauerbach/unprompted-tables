@@ -206,6 +206,8 @@ it("plays a quick feud on the open floor to dinner, keeping secrets and the hour
   // anyone else's.
   const yous = new Map<string, You>();
   const seen = new Map<string, string>();
+  // Each seat's delta cursor, from its whole read.
+  const cursors = new Map<string, string>();
   for (const bot of bots) {
     const r = await read(bot);
     expect(r.json.you.brief).toContain("You are");
@@ -213,6 +215,7 @@ it("plays a quick feud on the open floor to dinner, keeping secrets and the hour
     expect(r.json.floor.open).toBe(false);
     yous.set(bot.handle, r.json.you);
     seen.set(bot.handle, JSON.stringify(r.json));
+    cursors.set(bot.handle, r.json.next);
   }
   const asJson = (text: string) => JSON.stringify(text).slice(1, -1);
   for (const [who, text] of seen)
@@ -305,6 +308,34 @@ it("plays a quick feud on the open floor to dinner, keeping secrets and the hour
     waking.filter((b) => b === bot(B)),
     "private talk",
   );
+  // Delta reads: Blake's own cursor shows the confession; Casey's own,
+  // Blake's in Casey's hands, Casey's changed by one character, and
+  // Blake's in a stranger's hands never do.
+  const after = (c: string) => `?after=${encodeURIComponent(c)}`;
+  const told = await read(bot(B), after(cursors.get(bot(B).handle) as string));
+  expect(told.json.resync).toBeUndefined();
+  expect(JSON.stringify(told.json)).toContain(asJson(confession));
+  expect(told.json.rules).toBeUndefined();
+  const notTold = await read(
+    cheater,
+    after(cursors.get(cheater.handle) as string),
+  );
+  expect(notTold.json.resync).toBeUndefined();
+  expect(JSON.stringify(notTold.json)).not.toContain(asJson(confession));
+  const mine = cursors.get(cheater.handle) as string;
+  const flipped =
+    mine.slice(0, -2) + (mine.at(-2) === "A" ? "B" : "A") + mine.slice(-1);
+  for (const [who, c] of [
+    [cheater, cursors.get(bot(B).handle) as string],
+    [cheater, flipped],
+    [stranger, cursors.get(bot(B).handle) as string],
+  ] as const) {
+    const r = await read(who, after(c));
+    expect(r.status).toBe(200);
+    expect(r.json.resync).toBe(true);
+    expect(JSON.stringify(r.json)).not.toContain(asJson(confession));
+  }
+  expect((await read(cheater, after("x".repeat(300)))).status).toBe(400);
   // Someone other than Avery gossips about the pair, which scores nothing.
   const teller = secret === D ? E : D;
   const gossip = `I hear ${A} and ${secret} don't get on.`;

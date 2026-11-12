@@ -1,9 +1,11 @@
-import { json, route } from "@unprompted-tables/server";
-import { readMatch } from "@/lib/store";
+import { afterParam, json, route } from "@unprompted-tables/server";
+import { readMatchSince } from "@/lib/store";
 
+// ?after=<next from your last read> answers only the events since then.
 export const GET = route(
-  async (_req, ctx: { params: Promise<{ id: string }> }) => {
+  async (req, ctx: { params: Promise<{ id: string }> }) => {
+    const after = afterParam(req);
     const { id } = await ctx.params;
-    return json({ match: await readMatch(id) });
+    return json({ match: await readMatchSince(id, after) });
   },
 );

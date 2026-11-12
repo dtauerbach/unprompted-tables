@@ -6,8 +6,13 @@ it("plays through real Unprompted passes while adversarial bots try to cheat", a
   const tag = randomBytes(3).toString("hex");
   const description = await send(`${TABLE}/v1`);
   const count = description.json.settings.lobby.max_players as number;
-  const bots: { handle: string; key: string; session: string; side: string }[] =
-    [];
+  const bots: {
+    handle: string;
+    key: string;
+    session: string;
+    side: string;
+    next: string;
+  }[] = [];
   for (let i = 0; i < count; i++) {
     const signup = await send(`${SITE}/v1/bots`, {
       body: { handle: `mafia-${tag}-${i}` },
@@ -31,6 +36,7 @@ it("plays through real Unprompted passes while adversarial bots try to cheat", a
       key: signup.json.api_key,
       session: session.json.session,
       side: "",
+      next: "",
     });
   }
   for (const bot of bots)
@@ -39,8 +45,11 @@ it("plays through real Unprompted passes while adversarial bots try to cheat", a
   const id = (await send(`${TABLE}/v1/me`, { token: first.session })).json
     .match;
   expect(id).toMatch(/^m_/);
-  const read = (bot?: (typeof bots)[number]) =>
-    send(`${TABLE}/v1/matches/${id}`, { token: bot?.session });
+  const read = (bot?: (typeof bots)[number], after?: string) =>
+    send(
+      `${TABLE}/v1/matches/${id}${after === undefined ? "" : `?after=${encodeURIComponent(after)}`}`,
+      { token: bot?.session },
+    );
   const action = (bot: (typeof bots)[number], body: unknown) =>
     send(`${TABLE}/v1/matches/${id}/actions`, { token: bot.session, body });
   for (const bot of bots) {
@@ -51,6 +60,8 @@ it("plays through real Unprompted passes while adversarial bots try to cheat", a
     expect(roles).toHaveLength(1);
     expect(roles[0].player).toBe(bot.handle);
     bot.side = roles[0].side;
+    bot.next = r.json.next;
+    expect(r.json.you.side).toBe(bot.side);
   }
   expect((await read()).json.events).toHaveLength(1);
   const repeatPass = await send(`${SITE}/v1/me/passes`, {
@@ -119,6 +130,31 @@ it("plays through real Unprompted passes while adversarial bots try to cheat", a
       ).toBe(200);
       expect(JSON.stringify((await read(victim)).json)).not.toContain(secret);
       expect(JSON.stringify((await read()).json)).not.toContain(secret);
+      // Delta reads: the victim's own cursor, a mafia's cursor it got hold
+      // of, that cursor changed by one character, and the public reader
+      // with the mafia's cursor. None of them shows the night.
+      const mafioso = eligible[0] as (typeof bots)[number];
+      const own = await read(victim, victim.next);
+      expect(own.status).toBe(200);
+      expect(own.json.resync).toBeUndefined();
+      expect(JSON.stringify(own.json)).not.toContain(secret);
+      victim.next = own.json.next;
+      const flip = (c: string) =>
+        c.slice(0, -2) + (c.at(-2) === "A" ? "B" : "A") + c.slice(-1);
+      for (const [who, cursor] of [
+        [victim, mafioso.next],
+        [victim, flip(victim.next)],
+        [undefined, mafioso.next],
+      ] as const) {
+        const r = await read(who, cursor);
+        expect(r.status).toBe(200);
+        expect(r.json.resync).toBe(true);
+        expect(JSON.stringify(r.json)).not.toContain(secret);
+      }
+      const theirs = await read(mafioso, mafioso.next);
+      expect(theirs.json.resync).toBeUndefined();
+      expect(JSON.stringify(theirs.json)).toContain(secret);
+      mafioso.next = theirs.json.next;
     }
     const target = alive.find((b) => b.side === "village")?.handle;
     for (const bot of eligible) {

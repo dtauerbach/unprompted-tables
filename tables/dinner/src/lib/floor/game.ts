@@ -1,4 +1,8 @@
-import { type VisibleEvent, visibleEvents } from "@unprompted-tables/game";
+import {
+  type VisibleEvent,
+  visibleEvents,
+  visibleSince,
+} from "@unprompted-tables/game";
 import { ApiError } from "@unprompted-tables/server";
 import { canonicalOrder, pointsOf } from "../exec/solver";
 import { newSeed } from "../rng";
@@ -999,6 +1003,108 @@ export function view(
     ),
     notice: NOTICE,
     result: s.end && over ? resultView(s, s.end) : null,
+  };
+}
+
+// One event as a delta read shows it: what changed, by executive, never by
+// stored position. What the first read already gave and never changes
+// (the start, the guests, the reader's brief) shows as nothing here.
+function changed(s: FloorState, e: Body) {
+  switch (e.kind) {
+    case "talk":
+      return {
+        kind: "talk" as const,
+        at: e.at,
+        from: name(executiveOf(s, e.player) as number),
+        to: e.to ?? null,
+        untrusted_text: e.text,
+      };
+    case "propose":
+      return {
+        kind: "moved" as const,
+        at: e.at,
+        motion: e.motion,
+        mover: name(executiveOf(s, e.player) as number),
+        seating: e.seating,
+      };
+    case "back":
+      return {
+        kind: "your_ballot" as const,
+        at: e.at,
+        motion: e.motion,
+        ballot: e.ballot,
+      };
+    case "motion":
+      return {
+        kind: "closed" as const,
+        at: e.at,
+        motion: e.motion,
+        passed: e.passed,
+        yes: e.yes,
+        no: e.no,
+        closed_by: e.by,
+        ballots: e.ballots,
+      };
+    case "name":
+      return {
+        kind: "your_guess" as const,
+        at: e.at,
+        executive: e.executive,
+        dislikes: e.dislikes,
+      };
+    case "end":
+      return {
+        kind: "served" as const,
+        at: e.at,
+        how: e.how,
+        seating: e.seating,
+      };
+    default:
+      return null;
+  }
+}
+
+// A delta read: the match's state as it stands, without the parts that
+// never change (rules, the table, likes, the brief's words: the whole read
+// has them), and only the events this reader can see that it hasn't been
+// shown. `after` counts events visible to this reader alone (visibleSince),
+// and stays its own after dinner, when the whole read shows everyone's
+// private talk and guesses. seen is the count to seal as its next cursor.
+// A count that can't be one of its own gets the whole view, marked resync.
+export function delta(
+  s: FloorState,
+  events: FloorEvent[],
+  player: string | null,
+  after: number | null,
+  opts: { now?: Date; ask?: string[] } = {},
+) {
+  const reader =
+    player !== null && executiveOf(s, player) !== null ? player : null;
+  const d = visibleSince(events, reader, after);
+  const v = view(s, events, player, opts);
+  if (d.resync) return { view: { ...v, resync: true as const }, seen: d.seen };
+  const you = v.you ? (({ brief: _brief, ...rest }) => rest)(v.you) : null;
+  return {
+    view: {
+      id: v.id,
+      rules_version: v.rules_version,
+      phase: v.phase,
+      due: v.due,
+      next_deadline: v.next_deadline,
+      floor: v.floor,
+      dinner: v.dinner,
+      you,
+      standing: v.standing,
+      open_motions: v.motions.filter((m) => m.status === "open"),
+      ...("asked" in v ? { asked: v.asked } : {}),
+      events: d.events.flatMap((e) => {
+        const c = changed(s, e);
+        return c ? [c] : [];
+      }),
+      notice: v.notice,
+      result: v.result,
+    },
+    seen: d.seen,
   };
 }
 

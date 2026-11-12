@@ -2,8 +2,11 @@ import { randomBytes } from "node:crypto";
 import { type Result, resultSchema } from "@unprompted-tables/game";
 import {
   ApiError,
+  cursorScope,
   db,
   isReadOnly,
+  openCursor,
+  sealCursor,
   sweepLobby,
   type Tx,
 } from "@unprompted-tables/server";
@@ -137,6 +140,24 @@ export function view(state: MatchState, events: MatchEvent[]): MatchView {
 // hold up the players. Only when a phase has run out does reading take the
 // lock and store the clock's events, and not when the Table is read-only:
 // then the closed phases show but aren't stored.
+// A read with `after` (the `next` of an earlier read) gets the same match
+// with only the events since; every read carries `next`. Every event here
+// is public, but the cursor is sealed like every Table's, so it reads the
+// same way. One that doesn't open gets every event, marked resync.
+export async function readMatchSince(
+  id: string,
+  after: string | undefined,
+): Promise<MatchView & { next: string; resync?: true }> {
+  const whole = await readMatch(id);
+  const scope = cursorScope(GAME, id, null);
+  const count = after === undefined ? null : openCursor(scope, after);
+  const next = sealCursor(scope, whole.events.length);
+  if (after === undefined) return { ...whole, next };
+  if (count === null || count > whole.events.length)
+    return { ...whole, resync: true, next };
+  return { ...whole, events: whole.events.slice(count), next };
+}
+
 export async function readMatch(id: string): Promise<MatchView> {
   if (!MATCH_ID_RE.test(id)) throw noSuchMatch(id);
   const seen = await db().begin(async (tx) => {
