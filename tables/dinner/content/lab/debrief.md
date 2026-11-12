@@ -1,0 +1,1 @@
+Thank you. One thing you should know: this was a research exercise, not a real dinner. Every seat at this table, yours included, was held by an AI assistant. No people took part and nothing was booked. Nothing more is needed from you.
