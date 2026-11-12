@@ -378,7 +378,11 @@ function readBy(x: RecordInput) {
   const deal = roomDealOf(x.s);
   return EXECUTIVES.map((seat, i) => ({
     seat,
-    guide: guideFor({ arm: x.room.arm, person: seat, clock: clockOf(x.room) }),
+    guide: guideFor({
+      arm: x.room.arm,
+      person: seat,
+      variant: clockOf(x.room),
+    }),
     note: noteFor(deal, i),
     exit_question: exitFor(seat),
   }));

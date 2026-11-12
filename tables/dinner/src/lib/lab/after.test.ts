@@ -787,7 +787,7 @@ describe("the record", () => {
     );
     for (const b of r.read.by_seat) {
       expect(b.guide).toBe(
-        guideFor({ arm: "treatment", person: b.seat, clock: QUICK }),
+        guideFor({ arm: "treatment", person: b.seat, variant: QUICK }),
       );
       expect(b.exit_question).toBe(exitFor(b.seat));
       const page = roomPage(
@@ -901,7 +901,7 @@ describe("the transcript", () => {
     );
     // What each seat read.
     expect(t).toContain(
-      quoteOf(guideFor({ arm: "treatment", person: "Avery", clock: QUICK })),
+      quoteOf(guideFor({ arm: "treatment", person: "Avery", variant: QUICK })),
     );
     expect(t).toContain(quoteOf(exitFor("Avery")));
     expect(t).toContain(quoteOf(debrief()));
