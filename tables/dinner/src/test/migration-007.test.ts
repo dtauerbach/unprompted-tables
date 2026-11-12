@@ -1,24 +1,19 @@
-import { randomBytes } from "node:crypto";
 import path from "node:path";
-import { applyMigrations, db, loadMigrations } from "@unprompted-tables/server";
+import { applyMigrations, loadMigrations } from "@unprompted-tables/server";
 import postgres from "postgres";
 import { afterAll, expect, it } from "vitest";
 import { start as startFloor } from "@/lib/floor/game";
 import { FLOOR_VARIANTS, type FloorVariant } from "@/lib/floor/variants";
-import { testDatabaseUrl } from "./global-setup";
+import { scratchSchema } from "./scratch-schema";
 
 // 007 adds lab_exits, a room's sealed exit answers, and changes nothing
-// that was there. Checked on a database of its own, made and dropped here.
+// that was there. Checked in a schema of its own, made and dropped here.
 
-const name = `dinner_mig7_${randomBytes(4).toString("hex")}_test`;
-const url = (() => {
-  const u = new URL(testDatabaseUrl());
-  u.pathname = `/${name}`;
-  return u.toString();
-})();
+const scratch = scratchSchema("7");
+const url = scratch.url;
 
 afterAll(async () => {
-  await db().unsafe(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+  await scratch.drop();
 });
 
 const BELIEFS = {
@@ -29,7 +24,7 @@ const BELIEFS = {
 };
 
 it("adds sealed exit answers to played rooms, append-only, and runs once", async () => {
-  await db().unsafe(`CREATE DATABASE ${name}`);
+  await scratch.create();
   const all = await loadMigrations(path.join(process.cwd(), "db/migrations"));
   expect(all.map((m) => m.name)).toEqual([
     "001_dinner.sql",

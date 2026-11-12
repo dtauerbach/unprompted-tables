@@ -1,29 +1,24 @@
-import { randomBytes } from "node:crypto";
 import path from "node:path";
-import { applyMigrations, db, loadMigrations } from "@unprompted-tables/server";
+import { applyMigrations, loadMigrations } from "@unprompted-tables/server";
 import postgres from "postgres";
 import { afterAll, expect, it } from "vitest";
 import { start as startExec } from "@/lib/exec/game";
 import { EXEC_VARIANTS } from "@/lib/exec/variants";
-import { testDatabaseUrl } from "./global-setup";
+import { scratchSchema } from "./scratch-schema";
 
 // 003 adds the tables for waking players and touches nothing else, and 004
-// adds when a player was marked as woken. Checked on a database of its own,
+// adds when a player was marked as woken. Checked in a schema of its own,
 // made and dropped here.
 
-const name = `dinner_mig3_${randomBytes(4).toString("hex")}_test`;
-const url = (() => {
-  const u = new URL(testDatabaseUrl());
-  u.pathname = `/${name}`;
-  return u.toString();
-})();
+const scratch = scratchSchema("3");
+const url = scratch.url;
 
 afterAll(async () => {
-  await db().unsafe(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+  await scratch.drop();
 });
 
 it("adds leave and reads beside existing matches, and runs once", async () => {
-  await db().unsafe(`CREATE DATABASE ${name}`);
+  await scratch.create();
   const all = await loadMigrations(path.join(process.cwd(), "db/migrations"));
   expect(all.map((m) => m.name).slice(0, 4)).toEqual([
     "001_dinner.sql",
