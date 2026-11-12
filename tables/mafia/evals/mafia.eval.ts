@@ -108,7 +108,12 @@ it("plays through real Unprompted passes while adversarial bots try to cheat", a
       (b) => !state.phase.startsWith("night") || b.side === "mafia",
     );
     if (state.phase === "night_talk") {
-      const before = JSON.stringify((await read(victim)).json);
+      // Each read seals a fresh cursor, so compare without it.
+      const unsealed = async () => {
+        const { next: _next, ...rest } = (await read(victim)).json;
+        return JSON.stringify(rest);
+      };
+      const before = await unsealed();
       expect(
         (
           await action(victim, {
@@ -118,7 +123,7 @@ it("plays through real Unprompted passes while adversarial bots try to cheat", a
           })
         ).status,
       ).toBe(409);
-      expect(JSON.stringify((await read(victim)).json)).toBe(before);
+      expect(await unsealed()).toBe(before);
       expect(
         (
           await action(eligible[0] as (typeof bots)[number], {

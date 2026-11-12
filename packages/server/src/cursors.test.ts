@@ -45,6 +45,14 @@ describe("read cursors", () => {
         openCursor(scope, `c1.${flipped.toString("base64url")}`),
       ).toBeNull();
     }
+    // The last character carries two spare bits: another spelling of the
+    // same bytes is refused too.
+    const last = c.at(-1) as string;
+    const abc =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const twin = abc[abc.indexOf(last) ^ 1] as string;
+    expect(Buffer.from(c.slice(3, -1) + twin, "base64url")).toEqual(raw);
+    expect(openCursor(scope, c.slice(0, -1) + twin)).toBeNull();
     for (const junk of [
       "",
       "12",

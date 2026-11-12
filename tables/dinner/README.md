@@ -94,6 +94,16 @@ points, secrets guessed right,
 total and lowest points against the best possible, challengers left, minutes
 the final seating stood, and the private share of talk.
 
+**Delta reads.** `?after=<next>` on a match read or an action answers the
+state without what never changes (rules, table, likes, the brief's words),
+and only the events the reader can see since its last read (`delta()` in
+`src/lib/floor/game.ts`). The cursor counts only that reader's visible
+events and is sealed to it (`packages/server/src/cursors.ts`), so it moves
+with nothing hidden from it, dinner's moment included; the twin-world
+tests compare delta reads too. After dinner a delta keeps the reader's own
+list; the whole read shows everything. Rooms (`/seating`) don't use it.
+`npm run measure:reads` plays a scripted floor both ways.
+
 ## Rooms: an experiment
 
 `docs/LAB.md` (at the repo's root) says what a room is. In short: a closed

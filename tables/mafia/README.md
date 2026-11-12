@@ -21,6 +21,13 @@ ballots, ties, deadlines, limits and API examples.
   maps, recipient lists, or sequence gaps. Private conversation stays private
   after the match. A winning side result reveals all memberships; no-result
   games do not reveal roles. Death revelation can be disabled separately.
+- Reads and actions take `?after=<next>` and answer only the events since
+  (`delta()` in `match.ts`), with `you`: the reader's side, partners and
+  legal moves. The cursor counts only the events that reader can see
+  (`visibleSince` in `packages/game`), never the stored sequence, and is
+  sealed to the Table, match and reader (`packages/server/src/cursors.ts`):
+  another seat's, a forged or a stale cursor gets a resync of the reader's
+  own view. `npm run measure:reads` plays a scripted match both ways.
 - `store.ts` owns append-only storage and per-match row locks. It samples database
   time at transaction start, so waiting for a match lock does not consume the
   phase deadline. This is database transaction time, not HTTP arrival time.

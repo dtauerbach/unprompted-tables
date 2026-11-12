@@ -61,7 +61,10 @@ export function openCursor(scope: string, cursor: string): number | null {
   const raw = cursor.slice(PREFIX.length);
   if (!/^[A-Za-z0-9_-]+$/.test(raw)) return null;
   const bytes = Buffer.from(raw, "base64url");
-  if (bytes.length !== NONCE + TAG + 4) return null;
+  // Only the one spelling it was sealed with: base64's spare bits can't
+  // make a second string for the same cursor.
+  if (bytes.length !== NONCE + TAG + 4 || bytes.toString("base64url") !== raw)
+    return null;
   try {
     const decipher = createDecipheriv(
       "aes-256-gcm",

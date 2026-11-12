@@ -11,6 +11,7 @@
     "migrate": "tsx scripts/migrate.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "measure:reads": "MEASURE=1 vitest run src/lib/floor/read-cost.test.ts --reporter=verbose",
     "eval": "vitest run --config vitest.eval.config.ts"
   },
   "dependencies": {
