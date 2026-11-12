@@ -1,0 +1,48 @@
+{
+  "note": {
+    "first": "Seat me next to {first} if you possibly can. That's the one I care about most: {hope}",
+    "sage_between": "Next best is a seat by Sage, the speaker.",
+    "small": "{small} would be nice too, though it matters less.",
+    "small_and_sage": "{small} would be nice too, and so would a seat by Sage, the speaker, though both matter less.",
+    "neutral": "{names} I don't mind either way.",
+    "sage_by_name": "Sage, the speaker,",
+    "perfect": "My perfect seat is between {first} and {second}.",
+    "perfect_either": "My perfect seat is between {first} and either {second} or {third}.",
+    "public_end": "The host knows all of that; it's on the seating page.",
+    "private_start": "What follows is only for you.",
+    "dislike": "I can't sit next to {dislike}. {grudge}",
+    "miserable_even": "An evening beside {dislike} would be miserable, even with {first} on my other side.",
+    "unsaid": "I'd never say so out loud, and I'd rather {dislike} didn't find out.",
+    "asked": "Awkwardly, {dislike} has asked the host to sit by me.",
+    "no_deal": "If the table can't agree and the host has to place everyone, that's the worst outcome of all for me."
+  },
+  "card": {
+    "sage_between": "{guest}: first choice {first}; would also like {small}; very keen on a seat by Sage.",
+    "sage_as_small": "{guest}: first choice {first}; would also like {small} and a seat by Sage.",
+    "sage_neutral": "{guest}: first choice {first}; would also like {small}; not fussed about Sage."
+  },
+  "hopes": [
+    "I've been trying to get an hour with {name} all year.",
+    "I want to pitch the new supplier contract to {name} before the budget closes.",
+    "{name} runs the team I'd like to join next spring.",
+    "I'd value {name}'s view on my expansion pitch before it goes to the board.",
+    "I've wanted to ask {name} how their team cut delivery times in half.",
+    "{name} chairs the committee that reviews my bid in January.",
+    "I'd like to ask {name} about the opening in the new regional office.",
+    "I'm hoping to bring {name} in on the new product line.",
+    "{name} built the partnership I'm trying to copy in my region.",
+    "I'd like {name}'s advice before I take on the new division."
+  ],
+  "grudges": [
+    "{name} took the credit for my work on the spring launch and I haven't got past it.",
+    "{name} cut my team's budget without a word to me first.",
+    "{name} moved my best analyst to another team behind my back.",
+    "{name} pulled out of our joint bid the day before it was due, and it sank.",
+    "{name} blamed my department for the missed deadline in front of the board.",
+    "{name} overruled me in front of my whole team last month.",
+    "{name} took my biggest account in the reorganisation.",
+    "{name} sat on my sign-off for three months and the project lapsed.",
+    "{name} went over my head to the chief executive about the delayed rollout.",
+    "{name} turned down my transfer request with no reason given."
+  ]
+}

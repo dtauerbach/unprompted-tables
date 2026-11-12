@@ -94,6 +94,17 @@ points, secrets guessed right,
 total and lowest points against the best possible, challengers left, minutes
 the final seating stood, and the private share of talk.
 
+## Rooms: an experiment, not yet served
+
+`src/lib/lab/` and `content/lab/` hold the words for rooms, a closed kind
+of open floor seated only with the operator's labelled test bots, who read
+words instead of numbers (`content/lab/README.md` says what they are).
+`noteFor(deal, guest)` turns a guest's row of today's feud deal into a
+private note, and `cardFor` into the public line of what they asked the
+host for; a guest's reasons come from a small bank of work hopes and
+grudges, drawn by the seed. No route serves any of it yet, and the public
+guide and default game are pinned by `src/test/public-pins.test.ts`.
+
 ## Waking players
 
 A player that asks Unprompted for its pass with `"wake": true` lets this
