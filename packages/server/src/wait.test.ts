@@ -129,6 +129,86 @@ describe("waitForNews", () => {
     expect(probes).toBeGreaterThanOrEqual(19);
   });
 
+  it("keeps waiting when the stamp moves but the reader's answer doesn't", async () => {
+    // Something hidden from the reader is stored at every tick.
+    let n = 0;
+    const probe = async (): Promise<Probe> => ({
+      stamp: String(n++),
+      due: false,
+    });
+    const r = reads([quiet()]);
+    const t = Date.now();
+    const a = await waitForNews(r.read, 1, { everyMs: 50, probe });
+    expect(a).toEqual(quiet());
+    expect(Date.now() - t).toBeGreaterThanOrEqual(990);
+  });
+
+  it("answers a flip by the clock at the same moment whatever is hidden", async () => {
+    // A quiet answer that changes at a fixed time with no event, as dinner's
+    // floor opens, and a stamp that moves at tick 2 in one world only, as a
+    // private word between two others would move it.
+    const world = async (hidden: boolean) => {
+      const t = Date.now();
+      let tick = 0;
+      const probe = async (): Promise<Probe> => {
+        tick++;
+        return { stamp: hidden && tick >= 3 ? "2" : "1", due: false };
+      };
+      const read = async () =>
+        Date.now() - t >= 60 ? { ...quiet(), turn: 2 } : quiet();
+      const a = await waitForNews(read, 1, { everyMs: 50, probe });
+      return { a, took: Date.now() - t };
+    };
+    const [plain, hidden] = await Promise.all([world(false), world(true)]);
+    expect(plain.a).toEqual({ ...quiet(), turn: 2 });
+    expect(hidden.a).toEqual(plain.a);
+    // Both at the fifth tick, the first read due whatever else happened.
+    expect(plain.took).toBeGreaterThanOrEqual(240);
+    expect(hidden.took).toBeGreaterThanOrEqual(240);
+    expect(Math.abs(plain.took - hidden.took)).toBeLessThan(40);
+  });
+
+  it("answers the reader's own news as soon as the stamp moves", async () => {
+    let stamp = "1";
+    const r = reads([quiet(), news]);
+    const probe = async (): Promise<Probe> => ({ stamp, due: false });
+    const t = Date.now();
+    const waited = waitForNews(r.read, 1, { everyMs: 50, probe });
+    setTimeout(() => {
+      stamp = "2";
+    }, 60);
+    expect(await waited).toBe(news);
+    expect(Date.now() - t).toBeLessThan(200);
+  });
+
+  it("asks the probe before the first read, so news just after it is not late", async () => {
+    // The event lands right after the first read: the stamp taken before
+    // the read is older, so tick 1 sees it moved.
+    let stored = false;
+    const calls: string[] = [];
+    const probe = async (): Promise<Probe> => {
+      calls.push("probe");
+      return { stamp: stored ? "2" : "1", due: false };
+    };
+    let n = 0;
+    const read = async () => {
+      calls.push("read");
+      if (n++ === 0) {
+        stored = true;
+        return quiet();
+      }
+      return news;
+    };
+    const t = Date.now();
+    expect(await waitForNews(read, 1, { everyMs: 50, probe })).toBe(news);
+    expect(calls.slice(0, 2)).toEqual(["probe", "read"]);
+    expect(Date.now() - t).toBeLessThan(200);
+    // Without a wait there is no probe at all.
+    calls.length = 0;
+    await waitForNews(read, 0, { probe });
+    expect(calls).toEqual(["read"]);
+  });
+
   it("answers the last quiet read when the time is up, on fixed ticks", async () => {
     const r = reads([quiet("c1.a"), quiet("c1.b")]);
     const t = Date.now();

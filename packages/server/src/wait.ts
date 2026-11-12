@@ -6,13 +6,17 @@ import { ApiError } from "./http";
 // turn per check. Every two seconds the server asks the database one small
 // question about the match (how many events, is a deadline due), and makes
 // the reader's own read again only when that changed, a deadline passed,
-// or every fifth tick; it answers as soon as the reader's own answer
-// changes. The decision to answer looks only at that answer, which shows
-// nothing hidden from the reader, so something private to others landing
-// during the wait never makes it answer sooner, and the moment a wait
-// ends says no more than a read every two seconds would. Ticks fall at
-// fixed times from the start, not after each read, so how long a read
-// takes doesn't move them.
+// or every fifth tick. It answers as soon as the reader's own answer has
+// events for it, and a change with no events (a deadline flipping by the
+// clock) at the next scheduled read: every fifth tick, a deadline passing,
+// or the end. A read made only because the event count moved may be for
+// something hidden from the reader, so it answers only with the reader's
+// own events: otherwise a hidden event would bring forward the answer to a
+// flip pending anyway, and its timing would show the event. So the moment
+// a wait ends depends only on what the reader can see and the clock. Ticks
+// fall at fixed times from the start, not after each read, so how long a
+// read takes doesn't move them. The probe is asked before the first read,
+// so an event stored just after that read still moves the stamp.
 //
 // Only a player seated in the match may wait, at most two waits at a time
 // per player per match on one server, and never on a match that is over.
@@ -83,8 +87,11 @@ export function probeMatch(
         row.due !== null && row.t.getTime() + offsetMs() >= row.due.getTime(),
     };
   })();
-  probes.set(key, { at: Date.now(), answer });
-  answer.catch(() => probes.delete(key));
+  const entry = { at: Date.now(), answer };
+  probes.set(key, entry);
+  answer.catch(() => {
+    if (probes.get(key) === entry) probes.delete(key);
+  });
   if (probes.size > 1000)
     for (const [k, v] of probes)
       if (Date.now() - v.at > EVERY_MS) probes.delete(k);
@@ -92,6 +99,14 @@ export function probeMatch(
 }
 
 const waiting = new Map<string, number>();
+
+async function ask(probe?: () => Promise<Probe>): Promise<Probe | undefined> {
+  try {
+    return await probe?.();
+  } catch {
+    return undefined;
+  }
+}
 
 const pause = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve) => {
@@ -125,6 +140,9 @@ export async function waitForNews<T extends object>(
     everyMs?: number;
   } = {},
 ): Promise<T> {
+  // Asked before the first read, so whatever is stored after the read
+  // moves the stamp against it.
+  const before = seconds > 0 ? await ask(opts.probe) : undefined;
   const first = await read();
   if (seconds <= 0) return first;
   if (opts.seated && !opts.seated(first))
@@ -147,7 +165,7 @@ export async function waitForNews<T extends object>(
     waiting.set(reader, n + 1);
   }
   try {
-    return await hold(first, read, seconds, opts);
+    return await hold(first, before, read, seconds, opts);
   } finally {
     if (reader !== undefined) {
       const n = (waiting.get(reader) ?? 1) - 1;
@@ -159,6 +177,7 @@ export async function waitForNews<T extends object>(
 
 async function hold<T extends object>(
   first: T,
+  before: Probe | undefined,
   read: () => Promise<T>,
   seconds: number,
   opts: {
@@ -171,37 +190,32 @@ async function hold<T extends object>(
   const start = Date.now();
   const deadline = start + seconds * 1000;
   const was = state(first);
-  const ask = async () => {
-    try {
-      return await opts.probe?.();
-    } catch {
-      return undefined;
-    }
-  };
-  let seen = await ask();
+  let seen = before;
   let last = first;
   for (let tick = 1; ; tick++) {
     const at = Math.min(start + tick * every, deadline);
     await pause(at - Date.now(), opts.signal);
     if (opts.signal?.aborted) return last;
     const end = at >= deadline;
-    const now = opts.probe ? await ask() : undefined;
-    const full =
+    const now = opts.probe ? await ask(opts.probe) : undefined;
+    // Reads due whatever anyone else did: none of these can tell a hidden
+    // event happened.
+    const scheduled =
       !opts.probe ||
       end ||
       tick % FULL_EVERY === 0 ||
       now === undefined ||
       seen === undefined ||
-      now.due ||
-      now.stamp !== seen.stamp;
-    if (full) {
+      now.due;
+    if (scheduled || now?.stamp !== seen?.stamp) {
       try {
         last = await read();
       } catch {
         return last;
       }
       seen = now;
-      if (!quiet(last) || state(last) !== was) return last;
+      if (!quiet(last)) return last;
+      if (scheduled && state(last) !== was) return last;
     }
     if (end) return last;
   }

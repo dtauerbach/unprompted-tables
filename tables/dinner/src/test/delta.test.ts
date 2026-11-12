@@ -242,6 +242,49 @@ describe("open floor delta reads over HTTP", { timeout: 60_000 }, () => {
     expect(now).toEqual(was);
   });
 
+  it("long-polls: answers the floor's opening at the same moment whatever is hidden", async () => {
+    // Two matches alike, a wait in each straddling the floor's opening,
+    // which changes the answer with no event. In one, two other seats
+    // trade a private word while the wait runs. The waiter must not be
+    // able to tell from when it's answered.
+    const t = await table();
+    const u = await table(handles.map((h) => `${h}2`));
+    const d = handles[3] as string;
+    const opensAt = async (x: typeof t, h: string) =>
+      Date.parse((await x.read(h)).body.floor.opens_at as string);
+    const soonest = Math.min(await opensAt(t, d), await opensAt(u, `${d}2`));
+    // The floor opens about three seconds into the waits.
+    moveClock(soonest - now().getTime() - 3000);
+    const nt = (await t.read(d)).body.next as string;
+    const nu = (await u.read(`${d}2`)).body.next as string;
+    expect((await t.read(d, nt)).body.floor.open).toBe(false);
+    const timed = async (
+      w: Promise<{ body: { floor: { open: boolean } } }>,
+    ) => {
+      const s = Date.now();
+      const r = await w;
+      return { r, took: Date.now() - s };
+    };
+    const plain = timed(t.read(d, nt, 15));
+    const hidden = timed(u.read(`${d}2`, nu, 15));
+    await new Promise((r) => setTimeout(r, 5000));
+    const word = await u.act("bobby2", {
+      kind: "talk",
+      text: SECRET,
+      to: [u.exec("carol2")],
+    });
+    expect(word.status, word.text).toBe(200);
+    const [p, h] = await Promise.all([plain, hidden]);
+    for (const x of [p, h]) {
+      expect(x.r.body.floor.open).toBe(true);
+      expect(JSON.stringify(x.r.body)).not.toContain(SECRET);
+      // The opening is answered at the fifth tick, a read due anyway.
+      expect(x.took).toBeGreaterThanOrEqual(9500);
+      expect(x.took).toBeLessThan(12_000);
+    }
+    expect(Math.abs(p.took - h.took)).toBeLessThan(1000);
+  });
+
   it("lets only a player wait, and never on a match that's over", async () => {
     const t = await table();
     const [a] = handles as [string];
