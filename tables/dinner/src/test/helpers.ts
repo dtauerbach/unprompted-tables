@@ -6,7 +6,7 @@ import { now, resetClock } from "@/lib/clock";
 import { type AnyEvent, due, replay } from "@/lib/rules";
 
 export async function resetDb(): Promise<void> {
-  await db()`TRUNCATE sessions, players, queue, lobby, matches, open_matches, events, results, rate_limits, wake_leave, match_reads CASCADE`;
+  await db()`TRUNCATE sessions, players, queue, lobby, lab_matches, matches, open_matches, events, results, rate_limits, wake_leave, match_reads CASCADE`;
   resetClock();
 }
 

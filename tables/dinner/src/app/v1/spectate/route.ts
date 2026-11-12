@@ -33,6 +33,8 @@ export const GET = route(async () => {
     FROM matches m
     LEFT JOIN open_matches o ON o.match_id = m.id
     LEFT JOIN results r ON r.match_id = m.id
+    -- A room's match (docs/LAB.md) is never listed.
+    WHERE NOT EXISTS (SELECT 1 FROM lab_matches l WHERE l.match_id = m.id)
     ORDER BY (o.match_id IS NOT NULL) DESC, m.created_at DESC, m.id
     LIMIT 20`;
   return json(

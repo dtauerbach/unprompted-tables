@@ -8,7 +8,10 @@ const nextConfig: NextConfig = {
     "@unprompted-tables/server",
     "@unprompted-tables/spectator",
   ],
-  outputFileTracingIncludes: { "/skill.md": ["./content/skill.md"] },
+  outputFileTracingIncludes: {
+    "/skill.md": ["./content/skill.md"],
+    "/seating/[[...path]]": ["./content/lab/**"],
+  },
   async headers() {
     return [
       {
