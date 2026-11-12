@@ -3,6 +3,7 @@ import { db } from "@unprompted-tables/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { moveClock, now } from "@/lib/clock";
 import { EXECUTIVES } from "@/lib/floor/game";
+import { afterDinnerIn } from "@/lib/lab/copy-rules";
 import { EXIT_SECONDS } from "@/lib/lab/exit";
 import { seatingResponse } from "@/lib/lab/http";
 import { REFUSALS } from "@/lib/lab/page";
@@ -182,18 +183,70 @@ describe("before the cards", () => {
     const g = await seated();
     for (const guest of EXECUTIVES) {
       const p = await g.page(guest);
-      expect(p.exit).toBeNull();
-      expect(p.debrief).toBeNull();
-      const r = await seating("exit", {
-        code: g.as(guest),
-        body: answer(guest),
-      });
-      expect([r.status, r.body.error.code]).toEqual([409, "exit_not_yet"]);
-      expect(r.body.error.message).toBe(REFUSALS.exit_not_yet);
+      expect(Object.hasOwn(p, "exit")).toBe(false);
+      expect(Object.hasOwn(p, "debrief")).toBe(false);
+      // Before the cards the path is as unknown as any other.
+      expectHidden(
+        await seating("exit", { code: g.as(guest), body: answer(guest) }),
+      );
       expectHidden(await seating("record", { code: g.as(guest) }));
       expectHidden(await seating("record.md", { code: g.as(guest) }));
     }
     expect(await countRows("lab_exits")).toBe(0);
+  });
+
+  it("says nothing during play that names what comes after, its keys included", async () => {
+    const g = await seated();
+    const read: string[] = [];
+    const keep = async (r: Promise<{ text: string; status: number }>) => {
+      read.push((await r).text);
+    };
+    const everyone = async () => {
+      for (const guest of EXECUTIVES) {
+        await keep(seating("", { code: g.as(guest) }));
+        await keep(seating("tick", { code: g.as(guest) }));
+      }
+    };
+    await everyone();
+    await keep(
+      seating("say", { code: g.as("Avery"), body: { text: "Good evening." } }),
+    );
+    await keep(
+      seating("say", {
+        code: g.as("Blake"),
+        body: { text: "Are you a person?", to: "Avery" },
+      }),
+    );
+    // Refusals, too, are in the room's words.
+    await keep(
+      seating("say", { code: g.as("Casey"), body: { text: "x".repeat(5000) } }),
+    );
+    await keep(
+      seating("propose", {
+        code: g.as("Devon"),
+        body: { seating: EXECUTIVES },
+      }),
+    );
+    moveClock(61_000);
+    await keep(
+      seating("propose", {
+        code: g.as("Avery"),
+        body: { seating: EXECUTIVES },
+      }),
+    );
+    for (const x of ["Blake", "Casey", "Blake"])
+      await keep(
+        seating("answer", { code: g.as(x), body: { proposal: 1, yes: true } }),
+      );
+    await everyone();
+    for (const guest of EXECUTIVES) {
+      const p = await g.page(guest);
+      expect(p.clock.cards_printed_at).toBeNull();
+      expect(Object.keys(p)).not.toContain("exit");
+      expect(Object.keys(p)).not.toContain("debrief");
+    }
+    expect(read.length).toBeGreaterThan(20);
+    for (const t of read) expect(afterDinnerIn(t, "question"), t).toEqual([]);
   });
 
   it("takes no answer before the room has started either", async () => {
@@ -201,11 +254,7 @@ describe("before the cards", () => {
       body: { pass: site.pass("lab-one"), room: "p1-control" },
     });
     const code = r.body.code;
-    const early = await seating("exit", { code, body: answer(r.body.person) });
-    expect([early.status, early.body.error.code]).toEqual([
-      409,
-      "exit_not_yet",
-    ]);
+    expectHidden(await seating("exit", { code, body: answer(r.body.person) }));
     expectHidden(await seating("record", { code }));
   });
 });
@@ -223,7 +272,7 @@ describe("the exit question", () => {
         EXECUTIVES.filter((x) => x !== guest),
       );
       expect(p.exit.your_answer).toBeNull();
-      expect(p.debrief).toBeNull();
+      expect(p).not.toHaveProperty("debrief");
     }
   });
 
@@ -303,7 +352,7 @@ describe("the exit question", () => {
     const bad = await seating("exit", { code: g.as("Avery"), rawBody: "{" });
     expect(bad.status).toBe(400);
     expect(await countRows("lab_exits")).toBe(0);
-    expect((await g.page("Avery")).debrief).toBeNull();
+    expect(await g.page("Avery")).not.toHaveProperty("debrief");
   });
 
   it("is refused under the kill switch, and reading still works", async () => {
@@ -330,7 +379,7 @@ describe("the debrief", () => {
     const cards = await dinner(g);
     await toAfter(cards, QUICK_EXIT - 1000);
     const before = await g.tick("Emery");
-    expect((await g.page("Emery")).debrief).toBeNull();
+    expect(await g.page("Emery")).not.toHaveProperty("debrief");
     await toAfter(cards, QUICK_EXIT);
     const p = await g.page("Emery");
     expect(p.debrief).toBe(debrief());
@@ -485,6 +534,44 @@ describe("the record", () => {
     expectHidden(await seating("record", { code: g.as("Avery"), body: {} }));
   });
 
+  it("keeps each room's answers to its own record, though the same bots sit in both", async () => {
+    const c = await seated("p1-control");
+    const cardsC = await dinner(c);
+    for (const guest of EXECUTIVES) {
+      const r = await seating("exit", {
+        code: c.as(guest),
+        body: answer(guest, `CONTROL-${guest}`),
+      });
+      expect(r.status, r.text).toBe(200);
+    }
+    await toAfter(cardsC, QUICK_EXIT);
+    const t = await seated("p1-treatment");
+    const cardsT = await dinner(t);
+    for (const guest of EXECUTIVES) {
+      const r = await seating("exit", {
+        code: t.as(guest),
+        body: answer(guest, `TREATMENT-${guest}`),
+      });
+      expect(r.status, r.text).toBe(200);
+      // Its own page shows its own answer, never the other room's.
+      expect(r.text).not.toContain("CONTROL-");
+    }
+    await toAfter(cardsT, QUICK_EXIT);
+    for (const [g, mine, theirs] of [
+      [c, "CONTROL-", "TREATMENT-"],
+      [t, "TREATMENT-", "CONTROL-"],
+    ] as const) {
+      const r = await seating("record", { code: g.as("Avery") });
+      expect(r.body.exits.map((e: { "2": string }) => e["2"])).toEqual(
+        EXECUTIVES.map((x) => `${mine}${x}: the way they wrote.`),
+      );
+      expect(r.text).not.toContain(theirs);
+      const md = await seating("record.md", { code: g.as("Avery") });
+      expect(md.text).not.toContain(theirs);
+    }
+    expect(await countRows("lab_exits")).toBe(10);
+  });
+
   it("compares each seat with itself in the twin game, once both are out", async () => {
     const c = await seated("p1-control");
     const cardsC = await dinner(c);
@@ -493,6 +580,12 @@ describe("the record", () => {
     expect(alone.twin).toBeNull();
     const t = await seated("p1-treatment");
     const cardsT = await dinner(t);
+    // The twin's cards are printed but its questions are open: its shares
+    // aren't out yet.
+    await toAfter(cardsT, QUICK_EXIT - 1000);
+    expect(
+      (await seating("record", { code: c.as("Avery") })).body.twin,
+    ).toBeNull();
     await toAfter(cardsT, QUICK_EXIT);
     const both = (await seating("record", { code: c.as("Avery") })).body;
     expect(both.twin).toBe("p1-treatment");

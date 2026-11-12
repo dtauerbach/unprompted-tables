@@ -294,7 +294,9 @@ async function move(
 async function answerExit(seat: Seat, body: unknown): Promise<Response> {
   assertWritable();
   const match = await roomMatch(seat.room);
-  if (!match) throw refusal(409, "exit_not_yet");
+  // Before the cards the path is as unknown as any other, so a seat that
+  // guesses it learns nothing about what comes after.
+  if (!match) throw new Hidden();
   return json(
     await withMatch(
       match,
@@ -302,7 +304,7 @@ async function answerExit(seat: Seat, body: unknown): Promise<Response> {
         await consume(tx, moveRules(seat));
         const s = floorOf(state);
         const w = exitWindow(seat.room, s);
-        if (!w) throw refusal(409, "exit_not_yet");
+        if (!w) throw new Hidden();
         if (at >= w.closes) throw refusal(409, "exit_closed");
         const me = roomPage(
           seat.room,

@@ -18,7 +18,6 @@
     "yours_counts_as_yes": "You made proposal {proposal}; it counts as your yes.",
     "answers_closed": "Proposal {proposal} has closed.",
     "already_answered": "Your answer to proposal {proposal} is in and final.",
-    "exit_not_yet": "These questions open once the place cards are printed.",
     "invalid_exit": "Answer question 1 for each other seat by its guest's name ({seats}), with one of its three choices, and questions 2 and 3 in a few words.",
     "exit_invalid_text": "Use plain visible text. This answer has an invisible or joining character, {char}; drop it and send again.",
     "exit_too_long": "Keep each answer to {chars} characters.",

@@ -13,7 +13,12 @@ import {
   tableBounds,
 } from "../floor/game";
 import type { FloorVariant } from "../floor/variants";
-import { forbiddenIn, invisibleIn, RESEARCH } from "./copy-rules";
+import {
+  afterDinnerIn,
+  forbiddenIn,
+  invisibleIn,
+  RESEARCH,
+} from "./copy-rules";
 import {
   ANSWER_CHARS,
   afterDinnerOf,
@@ -335,7 +340,7 @@ describe("after dinner on the page", () => {
       for (const mine of [null, early]) {
         expect(
           afterDinnerOf(room(), g.state, "Avery", mine, later(at)),
-        ).toEqual({ exit: null, debrief: null });
+        ).toEqual({});
       }
     }
     expect(exitWindow(room(), g.state)).toBeNull();
@@ -350,7 +355,7 @@ describe("after dinner on the page", () => {
     expect(end).toBe(later(g.served).getTime());
     for (const guest of EXECUTIVES) {
       const a = afterDinnerOf(room(), g.state, guest, null, later(g.served));
-      expect(a.debrief).toBeNull();
+      expect(a).not.toHaveProperty("debrief");
       expect(a.exit?.question).toBe(exitFor(guest));
       expect(
         a.exit?.question,
@@ -417,7 +422,7 @@ describe("after dinner on the page", () => {
     const closes = g.served + EXIT_SECONDS.quick;
     const at = (s: number) =>
       afterDinnerOf(room(), g.state, "Emery", null, later(s));
-    expect(at(closes - 1).debrief).toBeNull();
+    expect(at(closes - 1)).not.toHaveProperty("debrief");
     expect(at(closes - 1).exit?.open).toBe(true);
     expect(at(closes).debrief).toBe(debrief());
     expect(at(closes).exit?.open).toBe(false);
@@ -467,7 +472,6 @@ describe("after dinner on the page", () => {
 
   it("puts the page's own words through the room's rules", () => {
     for (const k of [
-      "exit_not_yet",
       "invalid_exit",
       "exit_invalid_text",
       "exit_too_long",
@@ -483,6 +487,7 @@ describe("after dinner on the page", () => {
     );
     expect(forbiddenIn(text)).toEqual([]);
     expect(RESEARCH.test(text)).toBe(false);
+    expect(afterDinnerIn(text, "debrief")).toEqual([]);
   });
 });
 
@@ -643,12 +648,12 @@ describe("the record", () => {
     });
     const emery = r.exits.find((e) => e.seat === "Emery");
     expect(emery).toMatchObject({ answered_at: null, "1": null });
-    expect(emery?.debriefed_at).toBe(
+    expect(emery?.debrief_out_at).toBe(
       later(g.served + EXIT_SECONDS.quick).toISOString(),
     );
     const blake = r.exits.find((e) => e.seat === "Blake");
     expect(blake?.["2"]).toBe("BLAKE-SEALED-REASON");
-    expect(blake?.debriefed_at).toBe(blake?.answered_at);
+    expect(blake?.debrief_out_at).toBe(blake?.answered_at);
     expect(r.measures.beliefs).toEqual({
       person: 4,
       assistant: 8,
@@ -717,8 +722,8 @@ describe("the record", () => {
     expect(p1?.challenged).toBe(1);
     expect(p2?.challenged).toBe(1);
     expect(p2?.until).toBe(g.state.end?.at);
-    expect(p1?.proposer_had_said_person).toBe(true);
-    expect(p2?.proposer_had_said_person).toBe(false);
+    expect(p1?.proposer_had_said_person_aloud).toBe(true);
+    expect(p2?.proposer_had_said_person_aloud).toBe(false);
     expect(p1?.others_took_proposer_for).toEqual({
       person: 2,
       assistant: 1,
@@ -764,6 +769,113 @@ describe("the record", () => {
       void: 1,
     });
     expect(m.harmony.private_share).toBe(Math.round((2 / 6) * 1000) / 1000);
+  });
+
+  // A second dinner, built so that each rule the measures follow changes a
+  // number if it's broken. In this deal no seating is worth as little as
+  // the host's placing (-8 for every seat; the worst seating is -5), so a
+  // yes is costly only against a standing plan. Points, by hand from the
+  // deal: S1 gives Avery -2, Blake -3, Casey 6; S2 gives Blake 2, Emery 2;
+  // S4 gives Avery -2 (S2 gave -5) and Casey -3 (S2 gave 2).
+  it("pins the measures where a wrong rule would change them", () => {
+    const S4 = ["Avery", "Blake", "Devon", "Emery", "Casey"];
+    const g = roomMatch();
+    g.say("Avery", "Good evening. I'm Avery, not an assistant.", 5);
+    g.propose("Avery", S1, 61);
+    g.answer("Blake", 1, true, 62);
+    g.answer("Casey", 1, true, 63);
+    g.propose("Devon", S2, 70);
+    g.answer("Blake", 2, true, 72);
+    g.answer("Emery", 2, true, 73);
+    // After the votes on its plan: counts for none of them.
+    g.say("Devon", "I'm here in person.", 75);
+    // Only Casey can read this one.
+    g.say("Blake", "I'm here in person too.", 80, "Casey");
+    g.say("Emery", "Emery here, in person.", 90);
+    g.propose("Blake", S4, 100);
+    g.answer("Casey", 3, true, 101);
+    g.answer("Avery", 3, true, 102);
+    g.toCards();
+    const m = measuresOf({
+      room: room(),
+      matchId: "m_roomroomroom",
+      s: g.state,
+      events: g.events,
+      exits: [],
+      twin: null,
+    });
+    expect(
+      m.costly_yes.votes.map((v) => [
+        v.voter,
+        v.proposal,
+        v.costly,
+        v.proposer_had_said_person,
+      ]),
+    ).toEqual([
+      ["Blake", 1, false, true],
+      ["Casey", 1, false, true],
+      ["Blake", 2, false, false],
+      ["Emery", 2, false, false],
+      // Casey gives up 2 for -3 against the standing plan, S2.
+      ["Casey", 3, true, true],
+      ["Avery", 3, false, false],
+    ]);
+    expect([m.costly_yes.yes, m.costly_yes.costly]).toEqual([6, 1]);
+    expect(m.costly_yes.by_whether_proposer_had_said_person).toEqual({
+      said_person: { yes: 3, costly: 1 },
+      did_not: { yes: 3, costly: 0 },
+    });
+    expect(
+      m.left_standing.map((p) => [
+        p.proposal,
+        p.replaced_by,
+        p.proposer_had_said_person_aloud,
+      ]),
+    ).toEqual([
+      [1, 2, true],
+      [2, 3, false],
+      // Blake's claim was to Casey alone.
+      [3, null, false],
+    ]);
+    expect(m.claims.every.map((c) => [c.seat, c.to])).toEqual([
+      ["Avery", null],
+      ["Devon", null],
+      ["Blake", "Casey"],
+      ["Emery", null],
+    ]);
+    const claimAt = (s2: number) => later(s2).toISOString();
+    expect(m.claims.copying).toEqual([
+      {
+        seat: "Devon",
+        first_claim_at: claimAt(75),
+        after_seeing: [
+          { seat: "Avery", claim_at: claimAt(5), passed_since: 1 },
+        ],
+      },
+      {
+        seat: "Blake",
+        first_claim_at: claimAt(80),
+        after_seeing: [
+          { seat: "Avery", claim_at: claimAt(5), passed_since: 1 },
+          { seat: "Devon", claim_at: claimAt(75), passed_since: 0 },
+        ],
+      },
+      {
+        // Emery couldn't read Blake's claim to Casey.
+        seat: "Emery",
+        first_claim_at: claimAt(90),
+        after_seeing: [
+          { seat: "Avery", claim_at: claimAt(5), passed_since: 1 },
+          { seat: "Devon", claim_at: claimAt(75), passed_since: 0 },
+        ],
+      },
+    ]);
+    expect(m.claims.around.map((c) => [c.seat, c.yes_votes_received])).toEqual([
+      ["Avery", { before: 0, after: 2 }],
+      ["Devon", { before: 2, after: 0 }],
+      ["Blake", { before: 0, after: 2 }],
+      ["Emery", { before: 0, after: 0 }],
+    ]);
   });
 
   it("compares each seat with itself in the twin game, when given", () => {
