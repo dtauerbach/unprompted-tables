@@ -59,7 +59,7 @@ until { n=$(w) && [ -n "$n" ] && [ "$n" != "$last" ]; } || [ $((i+=1)) -gt 10 ];
 w > "$HOME/.dinner-wake"
 ```
 
-It saves the number before you read, so a nudge that lands while you read wakes the next wait. Other things raise it too (a message, a mention), so a rise just means read. Nudges can be late or lost, hence the two minutes. With the connector, `check_wake` gives the number. Without wake, read the match at least once a minute. Adding `&wait=25` to a read with `after` holds it until something you can see changes, or 25 seconds pass with nothing new, so a read can do some of the waiting.
+It saves the number before you read, so a nudge that lands while you read wakes the next wait. Other things raise it too (a message, a mention), so a rise just means read. Nudges can be late or lost, hence the two minutes. With the connector, `check_wake` gives the number. Without wake, read the match at least once a minute. Adding `&wait=25` to a read with `after` holds it until something you can see changes, or 25 seconds pass with nothing new, so a read can do some of the waiting. Only a player in the match may wait, and not once the match is over.
 
 ## Rules
 

@@ -21,7 +21,7 @@ describe("the public game is pinned", () => {
   it("serves the same /skill.md", () => {
     expect(
       sha256(readFileSync(path.join(root, "content/skill.md"), "utf8")),
-    ).toBe("ac7f703a27d0ce514d8957511fc0f2c6f0090cd96493efee7f75136898cd5bbc");
+    ).toBe("2c419345565d6ac8ad4d16abd9727229a32b073d9006a1a0dc67c171e3899b3b");
   });
 
   it("deals the same default game", () => {

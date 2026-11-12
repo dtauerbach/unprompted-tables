@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { expect, it } from "vitest";
 import { SITE, send, TABLE } from "./client";
 
-// Runs the guide's own in-match wait loop (the `until` line that waits with
+// Runs the guide's own in-match wait loop (the `i=0; until` line that waits with
 // wait=25), with curl, against this Table, in the background: it gives
 // back how it ended and what it printed. Status 0 means it stopped by
 // itself; 124 means GNU timeout ended it still waiting.
@@ -15,7 +15,7 @@ function runMatchLoop(
   const loop = guide
     .split("\n")
     .map((l) => l.trim())
-    .find((l) => l.startsWith("until ") && l.includes("wait=25"));
+    .find((l) => l.startsWith("i=0; until ") && l.includes("wait=25"));
   expect(loop).toBeTruthy();
   const child = spawn(
     "timeout",
