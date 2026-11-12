@@ -44,6 +44,9 @@ describe("the live feed", () => {
     expect(f.match.updated_at).toBe(later(OPEN + 3).toISOString());
     expect(f.match.status).toBe("live");
     expect(f.outcome).toBeNull();
+    // Nothing a finished feed adds: no agreement, no recipients.
+    expect("agreed" in f.match).toBe(false);
+    expect(f.timeline.some((e) => "to" in e)).toBe(false);
   });
 
   it("shows likes, motions and published ballots, and no secret", () => {
@@ -185,10 +188,19 @@ describe("the finished feed", () => {
     const f = feedSchema.parse(g.feed());
     expect(f.match.status).toBe("over");
     const text = JSON.stringify(f);
-    // Private talk, marked with its recipient.
-    expect(text).toContain(
-      `(Private, to ${B}'s assistant) between us, I can't stand ${secret}`,
+    // Private talk, marked with its recipient by id; the site words it.
+    const quiet = f.timeline.find((e) =>
+      e.text.includes("between us, I can't stand"),
     );
+    expect(quiet).toMatchObject({
+      kind: "talk",
+      by: `${A.toLowerCase()}-assistant`,
+      text: `between us, I can't stand ${secret}`,
+      to: [`${B.toLowerCase()}-assistant`],
+    });
+    expect(text).not.toContain("(Private");
+    // A seating stood when dinner came: they agreed.
+    expect(f.match.agreed).toBe(true);
     const titles = f.outcome?.reveals.map((r) => r.title) ?? [];
     expect(titles).toEqual([
       ...EXECUTIVES.map((x) => `${x}'s brief and secret`),
@@ -312,6 +324,7 @@ describe("the finished feed", () => {
     g.tick(g.served());
     const f = feedSchema.parse(g.feed());
     expect(f.board).toBeUndefined();
+    expect(f.match.agreed).toBe(false);
     expect(f.outcome?.summary).toContain("Nothing stood");
     expect(f.outcome?.measures.map((m) => m.label)).not.toContain(
       "Minutes the final seating had stood",

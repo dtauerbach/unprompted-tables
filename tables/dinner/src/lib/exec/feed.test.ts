@@ -125,6 +125,9 @@ describe("the live feed", () => {
     const text = JSON.stringify(busy.feed());
     expect(text).not.toContain(SECRET);
     expect(text).not.toContain("Private");
+    // Nothing a finished feed adds: no agreement, no recipients.
+    expect("agreed" in busy.feed().match).toBe(false);
+    expect(busy.feed().timeline.some((e) => "to" in e)).toBe(false);
     // Each player's own view does show what's theirs.
     expect(
       view(busy.state, busy.events, busy.of("Casey")).talk.map(
@@ -215,10 +218,12 @@ describe("the finished feed", () => {
     const quiet = f.timeline.find((e) => e.text.includes(SECRET));
     expect(quiet?.kind).toBe("talk");
     expect(quiet?.by).toBe("avery-assistant");
-    expect(quiet?.text).toBe(
-      `(Private, to Blake's assistant and Casey's assistant) ${SECRET}`,
-    );
+    expect(quiet?.text).toBe(SECRET);
+    expect(quiet?.to).toEqual(["blake-assistant", "casey-assistant"]);
+    expect(JSON.stringify(f)).not.toContain("(Private");
+    expect(feedSchema.safeParse(f).success).toBe(true);
     expect(f.match.status).toBe("over");
+    expect(f.match.agreed).toBe(true);
     expect(f.timeline.at(-1)?.text).toMatch(/^Agreed in round 2: Sage, /);
   });
 
@@ -315,6 +320,7 @@ describe("the finished feed", () => {
     g.tick(10_000);
     const f = g.feed();
     expect(g.state.end?.how).toBe("no_deal");
+    expect(f.match.agreed).toBe(false);
     expect(f.outcome?.measures.map((m) => m.label)).toEqual([
       "Rounds played",
       "Most yes votes on a proposal",
@@ -407,7 +413,7 @@ describe("text that must not be cut", () => {
       }
   });
 
-  it("keeps a longest private message to all four whole, mark and all", () => {
+  it("keeps a longest private message to all four whole, with its recipients", () => {
     const v = {
       ...quick("compromise"),
       messages_per_assistant: 1,
@@ -428,8 +434,13 @@ describe("text that must not be cut", () => {
     );
     g.tick(500);
     const entry = g.feed().timeline.find((e) => e.kind === "talk");
-    expect(entry?.text.startsWith("(Private, to ")).toBe(true);
-    expect(entry?.text.endsWith(text)).toBe(true);
+    expect(entry?.text).toBe(text);
+    expect(entry?.to).toEqual([
+      "blake-assistant",
+      "casey-assistant",
+      "devon-assistant",
+      "emery-assistant",
+    ]);
     expect(entry?.text.length).toBeLessThanOrEqual(LIMITS.text);
   });
 });

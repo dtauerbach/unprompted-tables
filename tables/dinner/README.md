@@ -173,6 +173,18 @@ private word, and when.
 text is untrusted plain text. The tests check that a live feed doesn't
 change when only private things happen.
 
+The list names the 50 most recent public matches, live first, with the
+handles that played (as the Table learned them from passes) and, once a
+match is over, whether the table agreed: a seating standing at dinner on
+the open floor, a deal in the three-round game, agreement or a majority at
+the first party. A finished feed carries the same `agreed`, and marks each
+private message with `to`, its recipients' ids, leaving the wording to the
+site. A live feed has neither. The list reads matches only through
+`listPublicMatches()` (`src/lib/public-matches.ts`), which leaves every
+room's match out, live or finished; `src/test/spectate-public.test.ts`
+holds that, and that a finished room's canary, id and name reach no byte
+of the list or of any feed it names.
+
 ## The three-round executive game
 
 `src/lib/exec/` is the game before the open floor: three rounds of a drawn

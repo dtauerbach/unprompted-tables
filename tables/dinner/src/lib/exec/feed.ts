@@ -87,16 +87,18 @@ export function execFeed(
         text: `Round ${b.round} of ${s.rules.rounds}. ${b.proposer}'s assistant proposes: filing opens at ${clock(plus(b.at, c.talk_min))} and closes at ${clock(plus(b.at, c.propose_by))}.`,
       });
     } else if (b.kind === "talk") {
-      const to = b.to;
+      // Private talk reaches the feed only once the match is over (shown),
+      // marked with whom it went to; the site words that itself.
       push({
         at: b.at,
         kind: "talk",
         by: by(b.player),
-        text: visibleText(
-          to
-            ? `(Private, to ${words(to.map((x) => `${x}'s assistant`))}) ${b.text}`
-            : b.text,
-        ),
+        text: visibleText(b.text),
+        ...(b.to?.length
+          ? {
+              to: b.to.map((x) => assistant(EXECUTIVES.indexOf(x))),
+            }
+          : {}),
       });
     } else if (b.kind === "propose") {
       const c = b.round === 1 ? s.rules.clocks.first : s.rules.clocks.later;
@@ -196,6 +198,8 @@ export function execFeed(
     match: {
       id: s.id,
       status: end ? "over" : "live",
+      // Whether the table settled on a seating; only once it's over.
+      ...(end ? { agreed: end.how === "deal" } : {}),
       started_at: s.opened,
       updated_at: updated,
       phase:
