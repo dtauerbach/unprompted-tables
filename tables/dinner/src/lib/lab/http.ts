@@ -115,7 +115,7 @@ async function dispatch(req: Request, path: string): Promise<Response> {
         guideFor({
           arm: seat.room.arm,
           person: seatOf(seat.room, seat.player).person,
-          clock: clockOf(seat.room),
+          variant: clockOf(seat.room),
         }),
         {
           headers: {

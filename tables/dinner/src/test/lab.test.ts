@@ -493,7 +493,7 @@ describe("a room in play", () => {
       guideFor({
         arm: "control",
         person: first.body.person,
-        clock: ROOM_CLOCKS.quick as FloorVariant,
+        variant: ROOM_CLOCKS.quick as FloorVariant,
       }),
     );
     // Before the fifth seat: the seat and its note, and a tick of 0.

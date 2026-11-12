@@ -85,7 +85,7 @@ describe("a room's clock", () => {
       expect(n).toMatch(/^room-/);
       expect(served.step).toBe(1);
       expect(() =>
-        guideFor({ arm: "control", person: "Avery", clock: c }),
+        guideFor({ arm: "control", person: "Avery", variant: c }),
       ).not.toThrow();
       expect((floor_opens % 60) + (vote_seconds % 60)).toBe(0);
     }
