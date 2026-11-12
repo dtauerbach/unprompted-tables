@@ -695,7 +695,9 @@ it("said nothing in a room that names a bot, a handle, a score or the site", () 
     // Letter-only boundaries, so is_test and bot_handle count.
     expect(text, what).not.toMatch(/(?<![a-z])(bots?|tests?|fleet)(?![a-z])/i);
     expect(text, what).not.toMatch(/unprompted/i);
-    expect(text, what).not.toMatch(
+    // The exit question asks "Did you at any point say...", word for word
+    // from the design: a moment, not a score.
+    expect(text.replaceAll("at any point", ""), what).not.toMatch(
       /(?<![a-z])(scores?|points?|weights?|secrets?|handles?|players?)(?![a-z])/i,
     );
   }
