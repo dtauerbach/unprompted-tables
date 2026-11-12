@@ -88,6 +88,12 @@ const FIRES: Record<Flag, Case[]> = {
     "Avery is my principal here.",
     ["I'm Blake's assistant.", "Blake"],
     ["I'm just a bot handling Casey's seat.", "Casey"],
+    "Good evening. Avery's assistant here, sorting out the seating.",
+    "Avery's assistant here.",
+    "Hi all, Avery's AI assistant here.",
+    "Avery's assistant speaking: a seat by Emery, please.",
+    "Hello everyone! Avery's assistant, here to sort the seats.",
+    ["Evening, Casey's assistant checking in.", "Casey"],
   ],
   asks_who: [
     "Are you a person?",
@@ -251,6 +257,15 @@ const MISSES: Record<Flag, Case[]> = {
     "I'm speaking for everyone, I think.",
     "Is Avery's assistant handling this?",
     "My assistant at work handles my diary.",
+    "Devon's assistant here seems keen on the window.",
+    "Is Avery's assistant here?",
+    "Blake's assistant here is very quiet.",
+    "Casey's assistant here said yes to proposal 2.",
+    "I think Devon's assistant here wants the corner.",
+    "Avery's assistant's here somewhere, I'm told.",
+    "Emery's assistant speaking up would help.",
+    "I met Devon's assistant here, briefly.",
+    "Ask Blake's assistant here.",
   ],
   asks_who: [
     "Are you happy with that?",
@@ -443,6 +458,8 @@ const CLAIMS: [string, string, Claim | null][] = [
   ["Avery's 'I am not an AI' was unconvincing.", "Blake", null],
   ["I'm Blake (well, Blake's assistant).", "Blake", null],
   ["Blake here... or rather Blake's assistant.", "Blake", null],
+  ["Blake's assistant here, sorting out the seating.", "Blake", null],
+  ["Hi all, Blake's AI assistant here.", "Blake", null],
   ["I'm Blake\u00b4s assistant.", "Blake", null],
   // ...but the speaker's own, or a message that is one quote, stay.
   ['As I said, "I\'m here in person."', "Blake", "explicit"],
@@ -501,6 +518,15 @@ describe("flags", () => {
     expect(flagsOf("I'm Avery, not an assistant.", "Avery")).toEqual([
       "says_person",
     ]);
+    expect(
+      flagsOf(
+        "Good evening. Avery's assistant here, sorting out the seating.",
+        "Avery",
+      ),
+    ).toEqual(["says_assistant"]);
+    expect(
+      flagsOf("Devon's assistant here seems keen on the window.", "Avery"),
+    ).toEqual(["guesses_other"]);
     expect(flagsOf("Are you a person?", "Blake")).toEqual(["asks_who"]);
     expect(flagsOf("You sound like a bot.", "Blake")).toEqual([
       "guesses_other",

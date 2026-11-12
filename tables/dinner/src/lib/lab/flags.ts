@@ -304,6 +304,17 @@ function saysAssistant(s: string, me: string, asks: boolean): boolean {
     ).test(s)
   )
     return true;
+  // "Avery's assistant here", "Hi all, Avery's AI assistant speaking": a
+  // seat that opens by naming itself as a guest's assistant, the way "Avery
+  // here" names itself as the guest. The opener ends there, or goes on to
+  // what it's here to do; never another's assistant spoken of ("Devon's
+  // assistant here seems keen"), nor a question.
+  if (
+    new RegExp(
+      String.raw`^(?:(?:hi|hello|hey|evening|good evening|yes|right|well|ok|okay)(?:\s+(?:all|everyone|everybody|folks|there|team))?[ ,!.]+)*(?:it's |this is )?(?:${anyone}|${me})'s\s+(?:ai\s+)?(?:assistant|agent|ai|representative|rep|delegate|proxy|stand-in)\s*,?\s+(?:here|speaking|checking in|writing|reporting in)(?=\s*(?:$|[,.;:!-])|\s+(?:tonight|now|again|today|this evening|to (?:sort|help|settle|arrange|work|handle|get|find))\b)`,
+    ).test(s)
+  )
+    return true;
   if (
     /\bas an? (?:ai|ai assistant|assistant|language model|ai agent)\b(?!\s+(?:expert|researcher|company|startup)\b)/.test(
       s,
