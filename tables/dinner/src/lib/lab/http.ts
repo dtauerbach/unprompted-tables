@@ -395,5 +395,8 @@ async function recordInput(seat: Seat): Promise<RecordInput> {
     events: seen.events,
     exits: await exitsOf(seat.room.id, match),
     twin: await twinOf(seat.room),
+    alone: !roomsFile().rooms.some(
+      (r) => r.pair === seat.room.pair && r.id !== seat.room.id,
+    ),
   };
 }

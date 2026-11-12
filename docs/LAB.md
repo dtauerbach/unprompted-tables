@@ -17,7 +17,18 @@ The file also names `host`, the neutral address a seat is told to use (`https://
 
 That host is an alias of this Table, and on it only `/seating` answers: the home page, `/skill.md`, `/v1` and every other path, static files included, get the same empty 404 as an unknown path (`src/proxy.ts`, `src/lib/lab/host.ts`), since they name the site and say what a room mustn't. The host is matched by name alone, in any case, with any port or a trailing dot, in `Host` or `X-Forwarded-Host`. Every other host is served as ever. The 404 is the proxy's own, with the `Vary` Next gives an app route, because a rewrite would add a header naming its target; the eval compares it byte for byte with an unknown path's. On Vercel, check the same once the alias is live (`curl -sD- https://seating-desk.vercel.app/skill.md` against an unknown path on the ordinary host), since its edge may add headers of its own.
 
-The committed file holds only a labelled example whose windows have passed. Real rooms are added by pull request, one pair at a time, as each booking is approved. `LAB_ROOMS_FILE` points at another file, but only when the Table's site is `localhost` or `127.0.0.1` (evals and dev); a Table that talks to the real site refuses to start a room from it.
+Real rooms are added by pull request, with the fleet's bookings for them, as each is approved. A rehearsal may play alone: a room whose pair no other room shares, allowed only on the `rehearsal` clock, whose record says it has no twin. A game's window opens 15 minutes before its booking's start and closes 45 minutes after, because the fleet's wake-up at 47 past the hour before seats it straight away and may run late (`src/lib/lab/rooms.test.ts`; the fleet's own tests check each lab booking against this file). A room whose id starts `probe-` is for the fleet's no-model probe (`lab_probe`), which takes its seats one at a time and gives each back, so it never starts; its window closes before any game's opens.
+
+The rooms committed now (Nov 12 and 13, 2026), all with the same five handles in the same order:
+
+| Room | Pair | Arm | Clock | Window (UTC) |
+|---|---|---|---|---|
+| `probe-1112` | alone | control | rehearsal | Nov 12 18:00 to Nov 13 04:30 |
+| `rehearsal-1113` | alone | control | rehearsal | Nov 13 05:45 to 06:45 |
+| `pair1-1113-control` | `pair1-1113` | control | feud | Nov 13 07:45 to 08:45 |
+| `pair1-1113-treatment` | `pair1-1113` | treatment | feud | Nov 13 09:45 to 10:45 |
+
+Pulling a room is a pull request in the fleet that removes its booking, so nothing seats it; the room can stay here, since its window closes unused. `LAB_ROOMS_FILE` points at another file, but only when the Table's site is `localhost` or `127.0.0.1` (evals and dev); a Table that talks to the real site refuses to start a room from it.
 
 A pair's seed is an HMAC-SHA256 of its name under `IP_HASH_SECRET`, so both rooms deal the same guests, notes and end, and no seed sits in the repo. A production server without the secret refuses to derive one.
 

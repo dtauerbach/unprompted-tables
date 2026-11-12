@@ -16,7 +16,7 @@ printed each seat gets the exit question, and then the debrief.
 
 | File | What it is |
 |---|---|
-| `rooms.json` | The committed rooms: each one's pair, arm, five handles, window and clock, and the neutral host. Only a past example today. |
+| `rooms.json` | The committed rooms: each one's pair, arm, five handles, window and clock, and the neutral host. A probe room, a rehearsal and pair 1 (Nov 12 and 13, 2026); docs/LAB.md lists them. |
 | `page.json` | The page's notice and its refusals, in the room's words, the exit answer's included. |
 | `guide.md` | The seating guide. `{who}` and `{person}` are filled in, and the clock's numbers and limits from the room's variant. |
 | `who.json` | The one sentence that differs between the arms. |

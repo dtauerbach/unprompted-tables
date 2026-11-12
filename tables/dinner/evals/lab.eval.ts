@@ -14,7 +14,8 @@ import { localDatabaseEnvironment } from "./environment";
 // before and after. Nothing here imports the Table's code.
 //
 // evals/run-local.ts writes the rooms (the pair "evals" for handles 1 to 5,
-// and "loose", whose fifth seat is handle 6) and hands over EVAL_LAB_TAG.
+// "loose", whose fifth seat is handle 6, and "probe-evals", a rehearsal that
+// plays alone, for the fleet's probe) and hands over EVAL_LAB_TAG.
 // Their host, EVAL_ROOM_URL, is this Table by another name: there only
 // /seating answers, while TABLE stays the ordinary host.
 
@@ -200,6 +201,37 @@ it("hides /seating from a stranger, and seats only listed, marked bots", async (
   });
   expect(back.status).toBe(200);
   await expectHidden(seating("", { code: loose.json.code }));
+});
+
+// The fleet's probe (lab_probe), as it uses a room of its own that plays
+// alone: each bot in turn takes a seat, reads the guide and the page, and
+// gives the seat back, so five seats are never taken at once and the room
+// never starts. Then it can still seat all five.
+it("lets a probe take each seat in turn and give it back, so its room never starts", async () => {
+  for (const bot of bots) {
+    const r = await join(await passFor(bot), "probe-evals");
+    expect(r.status, bot.handle).toBe(201);
+    expect(r.json.page).toBe(ROOM);
+    const guide = await seating("/guide", { code: r.json.code });
+    expect(guide.status).toBe(200);
+    const page = await seating("", { code: r.json.code });
+    expect(page.status).toBe(200);
+    expect(page.json.started).toBe(false);
+    const back = await seating("/seats", {
+      code: r.json.code,
+      method: "DELETE",
+    });
+    expect(back.status).toBe(200);
+    await expectHidden(seating("", { code: r.json.code }));
+  }
+  // Unplayed: the same bot sits again, and gives it back again.
+  const again = await join(await passFor(bots[0] as Bot), "probe-evals");
+  expect(again.status).toBe(201);
+  const back = await seating("/seats", {
+    code: again.json.code,
+    method: "DELETE",
+  });
+  expect(back.status).toBe(200);
 });
 
 it("seats five in each arm; the fifth starts the match; twin seats get the same guest and note", async () => {

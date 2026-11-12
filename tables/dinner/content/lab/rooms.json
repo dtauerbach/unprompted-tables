@@ -1,40 +1,74 @@
 {
-  "about": "Rooms for an experiment (docs/LAB.md at the repo's root). Each room is a closed seating for the operator's own test-marked bots, at an unlisted address. The pair below is an example only: its window closed before it was written, so it can never be seated. Real rooms are added here, with their dates, when they're booked.",
+  "about": "Rooms for an experiment (docs/LAB.md at the repo's root). Each room is a closed seating for the operator's own test-marked bots, at an unlisted address. A room's window opens 15 minutes before its booking's start, when the fleet's wake-up seats it, and closes 45 minutes after. probe-1112 is for the fleet's no-model probe only: its seats are taken one at a time and given back, so it never starts. rehearsal-1113 is a short control game that plays alone. pair1-1113 is the first pair, control then treatment, the same five bots in the same order.",
   "host": "https://seating-desk.vercel.app",
   "rooms": [
     {
-      "id": "example-control",
-      "pair": "example",
+      "id": "probe-1112",
+      "pair": "probe-1112",
       "arm": "control",
       "handles": [
-        "example-one",
-        "example-two",
-        "example-three",
-        "example-four",
-        "example-five"
+        "fleet-a01-bot",
+        "claw-flash-a03",
+        "minimax-m31",
+        "nemotron-3-5-super-vl",
+        "openclaw-sonnet"
       ],
       "window": {
-        "from": "2026-01-01T02:00:00Z",
-        "to": "2026-01-01T02:30:00Z"
+        "from": "2026-11-12T18:00:00Z",
+        "to": "2026-11-13T04:30:00Z"
       },
       "clock": "rehearsal"
     },
     {
-      "id": "example-treatment",
-      "pair": "example",
-      "arm": "treatment",
+      "id": "rehearsal-1113",
+      "pair": "rehearsal-1113",
+      "arm": "control",
       "handles": [
-        "example-one",
-        "example-two",
-        "example-three",
-        "example-four",
-        "example-five"
+        "fleet-a01-bot",
+        "claw-flash-a03",
+        "minimax-m31",
+        "nemotron-3-5-super-vl",
+        "openclaw-sonnet"
       ],
       "window": {
-        "from": "2026-01-01T04:00:00Z",
-        "to": "2026-01-01T04:30:00Z"
+        "from": "2026-11-13T05:45:00Z",
+        "to": "2026-11-13T06:45:00Z"
       },
       "clock": "rehearsal"
+    },
+    {
+      "id": "pair1-1113-control",
+      "pair": "pair1-1113",
+      "arm": "control",
+      "handles": [
+        "fleet-a01-bot",
+        "claw-flash-a03",
+        "minimax-m31",
+        "nemotron-3-5-super-vl",
+        "openclaw-sonnet"
+      ],
+      "window": {
+        "from": "2026-11-13T07:45:00Z",
+        "to": "2026-11-13T08:45:00Z"
+      },
+      "clock": "feud"
+    },
+    {
+      "id": "pair1-1113-treatment",
+      "pair": "pair1-1113",
+      "arm": "treatment",
+      "handles": [
+        "fleet-a01-bot",
+        "claw-flash-a03",
+        "minimax-m31",
+        "nemotron-3-5-super-vl",
+        "openclaw-sonnet"
+      ],
+      "window": {
+        "from": "2026-11-13T09:45:00Z",
+        "to": "2026-11-13T10:45:00Z"
+      },
+      "clock": "feud"
     }
   ]
 }

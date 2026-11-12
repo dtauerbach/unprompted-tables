@@ -1082,6 +1082,24 @@ describe("the transcript", () => {
     );
   });
 
+  it("says a room that plays alone has no twin, and a pair's room that its twin isn't over yet", () => {
+    const g = roomMatch();
+    g.toCards();
+    const of = (alone?: boolean) =>
+      transcriptOf({
+        room: room(),
+        matchId: "m_roomroomroom",
+        s: g.state,
+        events: g.events,
+        exits: [],
+        twin: null,
+        alone,
+      });
+    expect(of(true)).toContain("The twin room: none, this room plays alone.");
+    expect(of(false)).toContain("The twin room: not yet over.");
+    expect(of()).toContain("The twin room: not yet over.");
+  });
+
   it("keeps a message's own markdown inside its quote", () => {
     const g = roomMatch();
     g.say("Avery", "# Not a heading\n```\n## nor this", 5);

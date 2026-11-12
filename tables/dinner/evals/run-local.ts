@@ -121,8 +121,9 @@ try {
     throw new Error(`table bot registration: ${response.status}`);
   const registration = await response.json();
   // Rooms for evals/lab.eval.ts, seated by handles it signs up: a pair of
-  // five, and a pair whose fifth seat it never marks as a test bot. Local
-  // only: a Table whose site isn't local refuses LAB_ROOMS_FILE.
+  // five, a pair whose fifth seat it never marks as a test bot, and a room
+  // that plays alone, for the probe. Local only: a Table whose site isn't
+  // local refuses LAB_ROOMS_FILE.
   const labHandles = [1, 2, 3, 4, 5, 6].map((i) => `lab-${tag}-${i}`);
   const labWindow = {
     from: new Date(Date.now() - 60_000).toISOString(),
@@ -148,6 +149,15 @@ try {
       rooms: [
         ...pair("evals", labHandles.slice(0, 5)),
         ...pair("loose", [...labHandles.slice(0, 4), labHandles[5] as string]),
+        // A room that plays alone, as the fleet's probe uses one.
+        {
+          id: "probe-evals",
+          pair: "probe-evals",
+          arm: "control",
+          handles: labHandles.slice(0, 5),
+          window: labWindow,
+          clock: "rehearsal",
+        },
       ],
     }),
   );
