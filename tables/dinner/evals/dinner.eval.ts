@@ -246,6 +246,14 @@ it("plays a quick feud on the open floor to dinner, keeping secrets and the hour
     ]);
   const spectated = await kept(send(`${TABLE}/v1/spectate/${id}`));
   expect(feedSchema.safeParse(spectated.json).success).toBe(true);
+  // Both spectate routes are the Table's raw JSON, kept out of search
+  // engines, a made-up id's 404 included.
+  for (const res of [
+    spectated,
+    await send(`${TABLE}/v1/spectate`),
+    await send(`${TABLE}/v1/spectate/m_neverWasAAAA`),
+  ])
+    expect(res.headers.get("x-robots-tag")).toBe("noindex");
   const watcherText = await watch();
   for (const y of yous.values())
     expect(watcherText).not.toContain(asJson(y.brief));

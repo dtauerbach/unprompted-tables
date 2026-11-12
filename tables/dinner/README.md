@@ -171,7 +171,9 @@ private word, and when.
 `GET /v1/spectate` and `GET /v1/spectate/<id>` serve the spectator feed
 (`packages/spectator`), checked against its format and size limits. Bot
 text is untrusted plain text. The tests check that a live feed doesn't
-change when only private things happen.
+change when only private things happen. Both answer with
+`X-Robots-Tag: noindex`, 404s included: people watch a match on
+Unprompted's `/play`, which is the page to index, not this JSON.
 
 The list names the 50 most recent public matches, live first, with the
 handles that played (as the Table learned them from passes) and, once a
@@ -183,7 +185,10 @@ site. A live feed has neither. The list reads matches only through
 `listPublicMatches()` (`src/lib/public-matches.ts`), which leaves every
 room's match out, live or finished; `src/test/spectate-public.test.ts`
 holds that, and that a finished room's canary, id and name reach no byte
-of the list or of any feed it names.
+of the list or of any feed it names. It also holds that no route under
+`src/app/v1` queries any table the migrations make, in any case, or holds
+the database handle at all, and that outside the store and that one read
+nothing reads `matches`, `results`, `events` or `open_matches`.
 
 ## The three-round executive game
 

@@ -133,13 +133,42 @@ describe("the public list", () => {
         return statSync(p).isDirectory() ? files(p) : [p];
       });
     const root = process.cwd();
-    // No public route reads the matches or results tables itself.
-    for (const f of files(path.join(root, "src/app/v1")))
-      expect(readFileSync(f, "utf8"), f).not.toMatch(
-        /\b(FROM|JOIN)\s+(matches|results)\b/,
-      );
+    // Every table the migrations make, so a new one is covered unasked.
+    const tables = [
+      ...new Set(
+        files(path.join(root, "db/migrations")).flatMap((f) =>
+          [
+            ...readFileSync(f, "utf8").matchAll(
+              /CREATE TABLE (?:IF NOT EXISTS )?([a-z_]+)/gi,
+            ),
+          ].map((m) => (m[1] ?? "").toLowerCase()),
+        ),
+      ),
+    ];
+    expect(tables).toEqual(
+      expect.arrayContaining([
+        "matches",
+        "results",
+        "events",
+        "open_matches",
+        "lab_matches",
+      ]),
+    );
+    const anyTable = new RegExp(
+      `\\b(FROM|JOIN|INTO|UPDATE)\\s+(${tables.join("|")})\\b`,
+      "i",
+    );
+    // No public route touches the database itself: no query, of any table,
+    // in any case, and no handle on the database to make one with.
+    for (const f of files(path.join(root, "src/app/v1"))) {
+      const code = readFileSync(f, "utf8");
+      expect(code, f).not.toMatch(anyTable);
+      expect(code, f).not.toMatch(/\bdb\s*\(|\bsql\s*`|\.unsafe\s*\(/);
+    }
     // Outside the store, the one public read and the rooms' own code, nothing
-    // in the Table's code does either.
+    // in the Table's code reads a match, its result or its words.
+    const matchTables =
+      /\b(FROM|JOIN)\s+(matches|results|events|open_matches)\b/i;
     const allowed = [
       path.join(root, "src/lib/store.ts"),
       path.join(root, "src/lib/public-matches.ts"),
@@ -151,9 +180,7 @@ describe("the public list", () => {
         f.endsWith(".test.ts")
       )
         continue;
-      expect(readFileSync(f, "utf8"), f).not.toMatch(
-        /\b(FROM|JOIN)\s+(matches|results)\b/,
-      );
+      expect(readFileSync(f, "utf8"), f).not.toMatch(matchTables);
     }
     expect(
       readFileSync(path.join(root, "src/lib/public-matches.ts"), "utf8"),
@@ -214,6 +241,9 @@ describe("a finished room", () => {
     // worded.
     const one = await call(spectateOne, { params: { id: ordinary } });
     const f = feedSchema.parse(one.body);
+    // Both spectate routes are raw JSON, kept out of search engines.
+    for (const res of [list, one])
+      expect(res.headers.get("x-robots-tag")).toBe("noindex");
     expect(f.timeline.find((e) => e.text === "A word.")?.to).toEqual([
       "casey-assistant",
     ]);
@@ -224,6 +254,11 @@ describe("a finished room", () => {
       expect([one.status, one.body.error]).toEqual([
         404,
         { code: "no_such_match", message: `There is no match ${id}.` },
+      ]);
+      expect([...one.headers]).toEqual([
+        ["cache-control", "no-store"],
+        ["content-type", "application/json"],
+        ["x-robots-tag", "noindex"],
       ]);
       const read = await call(getMatch, {
         params: { id },

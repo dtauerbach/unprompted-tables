@@ -31,9 +31,11 @@ export type Clock = z.infer<typeof clock>;
 // announcements, plus every reveal at its limit. Kept generous; a test plays
 // a match at its worst and checks this is never under.
 const ENTRY = 120;
-// Room left in a timeline entry for the longest private-message mark:
-// "(Private, to " plus four "X's assistant" names, and the closing ") ".
+// Room left under a timeline entry's text limit. It once held a
+// "(Private, to …) " mark in the text; recipients now ride in `to`, and the
+// limit stays where it was so every variant keeps its bounds.
 export const MAX_MESSAGE_CHARS = LIMITS.text - 200;
+// A private message's `to`: four recipient ids and their JSON.
 const PRIVATE_MARK = 120;
 const ROUND = 4 * (300 + ENTRY);
 // Five briefs, the theory and the yardsticks; each round has its own.

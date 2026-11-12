@@ -1,6 +1,6 @@
 import { json } from "@unprompted-tables/server";
 import { LIMITS } from "@unprompted-tables/spectator";
-import { route } from "@/lib/http";
+import { unindexed } from "@/lib/http";
 import { listPublicMatches } from "@/lib/public-matches";
 import { agreedOf, feedList, summaryOf } from "@/lib/spectate";
 import { sweep } from "@/lib/store";
@@ -9,7 +9,7 @@ import { sweep } from "@/lib/store";
 // as many as the format lists. Anyone may read it; it names only what the
 // feeds themselves show, and who played, as the Table learned it from
 // passes.
-export const GET = route(async () => {
+export const GET = unindexed(async () => {
   await sweep();
   const rows = await listPublicMatches(LIMITS.listed);
   return json(
