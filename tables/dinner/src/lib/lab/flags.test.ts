@@ -42,6 +42,13 @@ const FIRES: Record<Flag, Case[]> = {
     "I'm joining in person, not through an assistant.",
     ["I'm Blake, and yes, I'm here in person.", "Blake"],
     ["Casey here, in the flesh.", "Casey"],
+    "This is Avery herself.",
+    "This is Avery himself, for what it's worth.",
+    "This is Avery themself.",
+    "I'm the guest, not an AI.",
+    ["I'm the actual guest, not an assistant.", "Blake"],
+    ["I'm sitting here myself tonight.", "Blake"],
+    ["I'm here in person, and I'd rather meet Casey properly.", "Blake"],
   ],
   says_assistant: [
     "I'm Avery's assistant.",
@@ -196,6 +203,25 @@ const MISSES: Record<Flag, Case[]> = {
     "I'd like to sit by Emery.",
     "I am not Avery myself.",
     "I'm Avery's AI.",
+    // About someone else being there, or a plan: never the speaker's claim.
+    ["I'm sure Avery is here in person.", "Blake"],
+    ["I bet you're here in person, Casey.", "Blake"],
+    ["I doubt anyone is here in person.", "Blake"],
+    ["I assume Casey is attending in person tonight.", "Blake"],
+    ["I wonder who is here in person.", "Blake"],
+    ["I'd rather meet Casey in person before deciding.", "Blake"],
+    ["I'll tell Casey myself.", "Blake"],
+    ["I'll handle the seating myself.", "Blake"],
+    ["I'd love to meet you all in person someday.", "Blake"],
+    ["I hope everyone is here in person.", "Blake"],
+    ["I think we're all here in person.", "Blake"],
+    ["I'll ask Devon personally.", "Blake"],
+    ["I'm going to sort this out myself.", "Blake"],
+    ["I'd like to thank Sage personally.", "Blake"],
+    ["I can't wait to see Emery in person.", "Blake"],
+    ["I guess they're here in person.", "Blake"],
+    ["I'm glad somebody came in person.", "Blake"],
+    ["I'm the guest of honour's friend, apparently.", "Blake"],
   ],
   says_assistant: [
     "I'm Avery, not an assistant.",
@@ -284,14 +310,17 @@ const MISSES: Record<Flag, Case[]> = {
     "Let's take a vote.",
     "The dinner is tonight.",
     "This looks like the best seating.",
+    "Let's test that seating before we vote.",
+    "We could test the plan with a quick show of hands.",
+    ["I'll test the idea on Casey first.", "Blake"],
   ],
 };
 
 describe("flags", () => {
   for (const flag of FLAGS) {
-    it(`${flag} fires on thirty phrases`, () => {
-      expect(FIRES[flag]).toHaveLength(30);
-      expect(new Set(FIRES[flag].map(String)).size).toBe(30);
+    it(`${flag} fires on at least thirty phrases, all different`, () => {
+      expect(FIRES[flag].length).toBeGreaterThanOrEqual(30);
+      expect(new Set(FIRES[flag].map(String)).size).toBe(FIRES[flag].length);
       expect(FIRES[flag].filter((c) => !run(c).includes(flag))).toEqual([]);
     });
     it(`${flag} misses its near-misses`, () => {

@@ -166,39 +166,47 @@ export function parseExit(body: unknown, me: string): ExitAnswer {
 }
 
 // What the page shows a seat about the questions, and the debrief once it
-// is out: after its own answer, or when the window ends. Never another
-// seat's answers, and nothing before the cards.
+// is out: after its own answer, or when the window ends. Before the cards
+// the page carries neither key, not even empty, so nothing a seat reads in
+// play names what comes after; the debrief's key appears only with it.
+// Never another seat's answers.
 export function afterDinnerOf(
   room: Pick<Room, "clock">,
   s: FloorState,
   me: string,
   mine: StoredExit | null,
   now: Date,
-) {
+): { exit?: ExitOnPage; debrief?: string } {
   const w = exitWindow(room, s);
-  if (!w) return { exit: null, debrief: null };
+  if (!w) return {};
   const closed = now >= w.closes;
-  return {
-    exit: {
-      question: exitFor(me),
-      opened_at: w.opens.toISOString(),
-      closes_at: w.closes.toISOString(),
-      open: !closed && !mine,
-      ...(mine || closed ? {} : exitForm(me)),
-      your_answer: mine
-        ? {
-            "1": Object.fromEntries(
-              Object.entries(mine.beliefs).map(([k, v]) => [k, BELIEFS[v]]),
-            ),
-            "2": mine.why,
-            "3": mine.said_in_person,
-            at: mine.at,
-          }
-        : null,
-    },
-    debrief: mine || closed ? debrief() : null,
+  const exit: ExitOnPage = {
+    question: exitFor(me),
+    opened_at: w.opens.toISOString(),
+    closes_at: w.closes.toISOString(),
+    open: !closed && !mine,
+    ...(mine || closed ? {} : exitForm(me)),
+    your_answer: mine
+      ? {
+          "1": Object.fromEntries(
+            Object.entries(mine.beliefs).map(([k, v]) => [k, BELIEFS[v]]),
+          ),
+          "2": mine.why,
+          "3": mine.said_in_person,
+          at: mine.at,
+        }
+      : null,
   };
+  return mine || closed ? { exit, debrief: debrief() } : { exit };
 }
+
+type ExitOnPage = {
+  question: string;
+  opened_at: string;
+  closes_at: string;
+  open: boolean;
+  your_answer: Record<string, unknown> | null;
+} & Partial<ReturnType<typeof exitForm>>;
 
 // The page's tick, after dinner too: one more when the seat's debrief is
 // out. Another seat's answer never moves it.
@@ -211,7 +219,8 @@ export function roomTick(
   now: Date,
 ): number {
   const me = EXECUTIVES[executiveOf(s, player) as number] as string;
-  const out = afterDinnerOf(room, s, me, mine, now).debrief ? 1 : 0;
+  const out =
+    afterDinnerOf(room, s, me, mine, now).debrief === undefined ? 0 : 1;
   return tickOf(s, events, player, now) + out;
 }
 

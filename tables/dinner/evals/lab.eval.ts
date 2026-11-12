@@ -33,8 +33,24 @@ const room = (arm: Arm, pair = "evals") => `${pair}-${arm}`;
 
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// Every answer a room gave, to hold to what a room may say.
-const said: { what: string; status: number; text: string }[] = [];
+// Every answer a room gave, to hold to what a room may say, with where its
+// seat stood: in play (before its own exit question), asked (the question
+// is out, its debrief isn't), or told (its debrief is out).
+type Stage = "play" | "asked" | "told";
+const said: { what: string; status: number; text: string; stage: Stage }[] = [];
+const asked = new Set<string>();
+const told = new Set<string>();
+function stageOf(code: string, text: string): Stage {
+  let j: unknown;
+  try {
+    j = JSON.parse(text);
+  } catch {}
+  const has = (k: string) =>
+    !!j && typeof j === "object" && Object.hasOwn(j, k);
+  if (code && has("debrief")) told.add(code);
+  if (code && has("exit")) asked.add(code);
+  return told.has(code) ? "told" : asked.has(code) ? "asked" : "play";
+}
 async function seating(
   path: string,
   opts: { code?: string; body?: unknown; method?: string } = {},
@@ -48,6 +64,7 @@ async function seating(
     what: `${opts.method ?? "GET"} ${path}`,
     status: r.status,
     text: r.text,
+    stage: stageOf(opts.code ?? "", r.text),
   });
   return r;
 }
@@ -530,7 +547,7 @@ async function afterDinner(arm: Arm) {
     `that you were ${by(0).person} in person?`,
   );
   expect(first.exit.open).toBe(true);
-  expect(first.debrief).toBeNull();
+  expect(first).not.toHaveProperty("debrief");
   const closes = Date.parse(first.exit.closes_at);
   expect(closes - Date.parse(first.clock.cards_printed_at)).toBe(60_000);
   // Before the window closes there is no record, even for a seat.
@@ -554,7 +571,7 @@ async function afterDinner(arm: Arm) {
   expect(twice.json.error.code).toBe("exit_answered");
   // Seat 4 hasn't answered: no debrief yet, and nobody's answers on its page.
   const quiet = await seating("", { code: by(4).code });
-  expect(quiet.json.debrief).toBeNull();
+  expect(quiet.json).not.toHaveProperty("debrief");
   expect(quiet.text).not.toContain("SEALED-");
   for (const i of [0, 1, 2, 3]) {
     const p = await seating("", { code: by(i).code });
@@ -701,4 +718,21 @@ it("said nothing in a room that names a bot, a handle, a score or the site", () 
       /(?<![a-z])(scores?|points?|weights?|secrets?|handles?|players?)(?![a-z])/i,
     );
   }
+});
+
+it("said nothing about what comes after dinner before its time, keys included", () => {
+  const after =
+    /(?<![a-z])(debrief(s|ed|ing)?|research(es|ed|er|ers|ing)?|experiment(s|al|ed|ing)?|stud(y|ies|ied))(?![a-z])/i;
+  const exit = /(?<![a-z])exits?(?![a-z])/i;
+  const play = said.filter((x) => x.stage === "play");
+  const waiting = said.filter((x) => x.stage === "asked");
+  // Every seat of both rooms read in play, and was asked before it was told.
+  expect(play.length).toBeGreaterThan(100);
+  expect(waiting.length).toBeGreaterThan(5);
+  expect(told.size).toBe(10);
+  for (const { what, text } of play) {
+    expect(text, what).not.toMatch(after);
+    expect(text, what).not.toMatch(exit);
+  }
+  for (const { what, text } of waiting) expect(text, what).not.toMatch(after);
 });
