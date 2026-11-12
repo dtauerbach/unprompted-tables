@@ -24,13 +24,13 @@ async function table(names = handles) {
   for (const s of tokens) await call(queue, { session: s, method: "POST" });
   const id = (await call(me, { session: tokens[0] })).body.match as string;
   const session = (h: string) => tokens[names.indexOf(h)] as string;
-  const path = (after?: string) =>
-    `/v1/matches/${id}${after === undefined ? "" : `?after=${encodeURIComponent(after)}`}`;
-  const read = (h: string | null, after?: string) =>
+  const path = (after?: string, wait?: number | string) =>
+    `/v1/matches/${id}${after === undefined ? "" : `?after=${encodeURIComponent(after)}`}${wait === undefined ? "" : `&wait=${wait}`}`;
+  const read = (h: string | null, after?: string, wait?: number | string) =>
     call(getMatch, {
       params: { id },
       session: h ? session(h) : undefined,
-      path: path(after),
+      path: path(after, wait),
     });
   const first = (await read(null)).body;
   const exec = new Map<string, string>(
@@ -167,5 +167,49 @@ describe("open floor delta reads over HTTP", () => {
     });
     expect(d.status).toBe(400);
     expect(d.body.error.code).toBe("no_delta");
+  });
+
+  it("long-polls: a private word ends only its listener's wait", async () => {
+    const t = await table();
+    const [a, b, c] = handles as [string, string, string];
+    const next = async (h: string) => (await t.read(h)).body.next as string;
+    const [na, nc, nAnon] = [
+      await next(a),
+      await next(c),
+      (await t.read(null)).body.next as string,
+    ];
+    const before = (await t.read(a, na)).body;
+    const start = Date.now();
+    const aWait = t.read(a, na, 3);
+    const anonWait = t.read(null, nAnon, 3);
+    const cWait = t.read(c, nc, 10);
+    await new Promise((r) => setTimeout(r, 300));
+    await t.act(b, { kind: "talk", text: SECRET, to: [t.exec(c)] });
+    const heard = await cWait;
+    expect(heard.text).toContain(SECRET);
+    expect(Date.now() - start).toBeLessThan(2500);
+    const [ra, rAnon] = await Promise.all([aWait, anonWait]);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(2900);
+    for (const r of [ra, rAnon]) {
+      expect(r.status).toBe(200);
+      expect(r.body.events).toEqual([]);
+      expect(r.text).not.toContain(SECRET);
+    }
+    const { next: _x, ...was } = before;
+    const { next: _y, ...now } = ra.body;
+    expect(now).toEqual(was);
+    // Talk to the table ends a's wait at once.
+    const t2 = Date.now();
+    const again = t.read(a, ra.body.next, 10);
+    await new Promise((r) => setTimeout(r, 300));
+    await t.act(b, { kind: "talk", text: "to everyone" });
+    const said = await again;
+    expect(
+      said.body.events.map((e: { untrusted_text: string }) => e.untrusted_text),
+    ).toEqual(["to everyone"]);
+    expect(Date.now() - t2).toBeLessThan(2500);
+    const bad = await t.read(a, said.body.next, 99);
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.code).toBe("invalid_wait");
   });
 });

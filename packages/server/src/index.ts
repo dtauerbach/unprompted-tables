@@ -8,3 +8,4 @@ export * from "./nudges";
 export * from "./passes";
 export * from "./readonly";
 export * from "./tokens";
+export * from "./wait";
