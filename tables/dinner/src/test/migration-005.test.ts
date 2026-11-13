@@ -1,31 +1,26 @@
-import { randomBytes } from "node:crypto";
 import path from "node:path";
-import { applyMigrations, db, loadMigrations } from "@unprompted-tables/server";
+import { applyMigrations, loadMigrations } from "@unprompted-tables/server";
 import postgres from "postgres";
 import { afterAll, expect, it } from "vitest";
 import { start as startExec } from "@/lib/exec/game";
 import { EXEC_VARIANTS } from "@/lib/exec/variants";
 import { start as startFloor } from "@/lib/floor/game";
 import { FLOOR_VARIANTS } from "@/lib/floor/variants";
-import { testDatabaseUrl } from "./global-setup";
+import { scratchSchema } from "./scratch-schema";
 
 // 005 lets events hold the open floor's two new kinds, a vote's close and a
-// sealed guess, and touches nothing else. Checked on a database of its own,
+// sealed guess, and touches nothing else. Checked in a schema of its own,
 // made and dropped here.
 
-const name = `dinner_mig5_${randomBytes(4).toString("hex")}_test`;
-const url = (() => {
-  const u = new URL(testDatabaseUrl());
-  u.pathname = `/${name}`;
-  return u.toString();
-})();
+const scratch = scratchSchema("5");
+const url = scratch.url;
 
 afterAll(async () => {
-  await db().unsafe(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+  await scratch.drop();
 });
 
 it("takes motions and guesses beside existing matches, and runs once", async () => {
-  await db().unsafe(`CREATE DATABASE ${name}`);
+  await scratch.create();
   const all = await loadMigrations(path.join(process.cwd(), "db/migrations"));
   expect(all[4]?.name).toBe("005_floor.sql");
   expect(await applyMigrations(url, all.slice(0, 4))).toHaveLength(4);

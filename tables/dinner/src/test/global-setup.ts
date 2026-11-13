@@ -27,6 +27,14 @@ export default async function setup(): Promise<void> {
   const sql = postgres(url, { max: 1, onnotice: () => {} });
   await sql`DROP SCHEMA public CASCADE`;
   await sql`CREATE SCHEMA public`;
+  // Scratch schemas the migration tests left behind if a run was cut short
+  // (src/test/scratch-schema.ts names them). The pattern goes as a
+  // parameter, so its escaped underscores reach Postgres as written, and
+  // each name is quoted.
+  for (const { drop } of await sql<{ drop: string }[]>`
+    SELECT format('DROP SCHEMA %I CASCADE', nspname) AS drop
+    FROM pg_namespace WHERE nspname LIKE ${"dinner\\_mig\\_%"}`)
+    await sql.unsafe(drop);
   await sql.end();
   await applyMigrations(
     url,

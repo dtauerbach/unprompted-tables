@@ -221,12 +221,12 @@ describe("a finished room", () => {
     moveClock(6 * 3_600_000);
     await sweep();
     expect(await db()`SELECT 1 FROM open_matches`).toHaveLength(0);
+    // Sorted here, not by the database: CI's Postgres collates en_US, which
+    // orders a random id like m_Zu… after m_ordinary…, unlike JS's sort.
     expect(
-      (
-        await db()<
-          { match_id: string }[]
-        >`SELECT match_id FROM results ORDER BY match_id`
-      ).map((r) => r.match_id),
+      (await db()<{ match_id: string }[]>`SELECT match_id FROM results`)
+        .map((r) => r.match_id)
+        .sort(),
     ).toEqual([room, ordinary].sort());
 
     // The room's own record holds the canary both ways, so a leak would show.

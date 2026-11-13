@@ -1,30 +1,25 @@
-import { randomBytes } from "node:crypto";
 import path from "node:path";
-import { applyMigrations, db, loadMigrations } from "@unprompted-tables/server";
+import { applyMigrations, loadMigrations } from "@unprompted-tables/server";
 import postgres from "postgres";
 import { afterAll, expect, it } from "vitest";
 import { start as startParty } from "@/lib/match";
 import { VARIANTS } from "@/lib/variants";
-import { testDatabaseUrl } from "./global-setup";
+import { scratchSchema } from "./scratch-schema";
 
 // 002 widens the events table's kinds for the executive game. On a database
 // that already holds first-party matches it must leave every row as it was,
-// and running the migrations again must do nothing. Checked on a database of
+// and running the migrations again must do nothing. Checked in a schema of
 // its own, made and dropped here, so other test files are untouched.
 
-const name = `dinner_mig_${randomBytes(4).toString("hex")}_test`;
-const url = (() => {
-  const u = new URL(testDatabaseUrl());
-  u.pathname = `/${name}`;
-  return u.toString();
-})();
+const scratch = scratchSchema("2");
+const url = scratch.url;
 
 afterAll(async () => {
-  await db().unsafe(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+  await scratch.drop();
 });
 
 it("leaves first-party rows alone and runs once", async () => {
-  await db().unsafe(`CREATE DATABASE ${name}`);
+  await scratch.create();
   const all = await loadMigrations(path.join(process.cwd(), "db/migrations"));
   expect(all.map((m) => m.name).slice(0, 2)).toEqual([
     "001_dinner.sql",
