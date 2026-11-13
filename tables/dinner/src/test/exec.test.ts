@@ -129,6 +129,8 @@ describe("a three-round match under way when the open floor came", () => {
     expect(feed.outcome?.reveals.length).toBe(5 + 1 + 2);
     const list = listSchema.parse((await call(spectateList)).body);
     expect(list.matches[0]?.summary).toBe("Agreed in round 1.");
+    expect(list.matches[0]?.agreed).toBe(true);
+    expect(feed.match.agreed).toBe(true);
     const late = await t.act(p, { kind: "talk", text: "hello?" });
     expect(late.body.error.code).toBe("match_over");
   });

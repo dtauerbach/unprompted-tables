@@ -56,6 +56,9 @@ const HOW: Record<string, string> = {
     "Time ran out with no clear favourite, so the seats were drawn at random.",
 };
 
+// The first party's ends in which the table itself settled the seating.
+const AGREED = new Set(["consensus", "majority"]);
+
 function partyFeed(s: MatchState, events: MatchEvent[]): Feed {
   const guest = (player: string) => id(guestOf(s, player) ?? player);
   const timeline: Feed["timeline"] = [];
@@ -138,6 +141,7 @@ function partyFeed(s: MatchState, events: MatchEvent[]): Feed {
     match: {
       id: s.id,
       status: s.end ? "over" : "live",
+      ...(s.end ? { agreed: AGREED.has(s.end.how) } : {}),
       started_at: s.opened,
       updated_at: updated,
       phase: s.end
@@ -239,33 +243,86 @@ function outcome(s: MatchState): NonNullable<Feed["outcome"]> {
   };
 }
 
+// A handle as the format takes it. Players' handles come from passes, so
+// all fit; one that somehow didn't would cost the whole list, so it's left
+// out instead.
+const HANDLE = /^[a-z][a-z0-9_-]{2,29}$/;
+
 export function feedList(
   rows: {
     id: string;
     started_at: Date;
     updated_at: Date;
     players: number;
+    handles?: string[];
     live: boolean;
     summary: string | null;
+    agreed?: boolean | null;
   }[],
 ): FeedList {
   return {
     format: SPECTATOR_LIST_FORMAT,
     table: TABLE,
-    matches: rows.slice(0, LIMITS.listed).map((r) => ({
-      id: r.id,
-      status: r.live ? "live" : "over",
-      started_at: r.started_at.toISOString(),
-      updated_at: r.updated_at.toISOString(),
-      players: r.players,
-      ...(r.summary
-        ? {
-            summary: visibleText(r.summary, LIMITS.label * 2).replace(
-              /\s+/g,
-              " ",
-            ),
-          }
-        : {}),
-    })),
+    matches: rows.slice(0, LIMITS.listed).map((r) => {
+      const handles = [...new Set(r.handles ?? [])]
+        .filter((h) => HANDLE.test(h))
+        .slice(0, LIMITS.participants);
+      return {
+        id: r.id,
+        status: r.live ? "live" : "over",
+        started_at: r.started_at.toISOString(),
+        updated_at: r.updated_at.toISOString(),
+        players: r.players,
+        ...(r.summary
+          ? {
+              summary: visibleText(r.summary, LIMITS.label * 2).replace(
+                /\s+/g,
+                " ",
+              ),
+            }
+          : {}),
+        ...(handles.length ? { handles } : {}),
+        // Only once it's over, as the format says.
+        ...(!r.live && typeof r.agreed === "boolean"
+          ? { agreed: r.agreed }
+          : {}),
+      };
+    }),
   };
+}
+
+type Result = {
+  how?: string;
+  round?: number;
+  motion?: number | null;
+  rules_version?: number;
+};
+
+// Whether a finished match's table settled on a seating: a standing motion
+// at dinner on the open floor, a deal in the three-round game, and an
+// agreement or a majority at the first party (not the host's choice when
+// time ran out).
+export function agreedOf(result: Result): boolean {
+  const how = result.how ?? "";
+  if (result.rules_version === 3) return how === "seated";
+  if (result.rules_version === 2) return how === "deal";
+  return AGREED.has(how);
+}
+
+// A finished match's one line on the list, in plain words.
+export function summaryOf(result: Result): string {
+  const how = result.how ?? "";
+  if (result.rules_version === 3)
+    return how === "seated"
+      ? "Agreed on a seating."
+      : "Dinner came with no seating agreed.";
+  if (result.rules_version === 2)
+    return how === "deal"
+      ? `Agreed in round ${result.round}.`
+      : "No deal: no seating passed.";
+  if (how === "consensus") return "Seated by agreement.";
+  if (how === "majority") return "Seated by a majority.";
+  if (how === "most_backed") return "Time ran out; the most backed plan won.";
+  if (how === "random") return "Time ran out; seats were drawn at random.";
+  return "Time ran out; the host seated everyone.";
 }

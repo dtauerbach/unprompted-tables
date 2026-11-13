@@ -26,3 +26,17 @@ export function route<C>(handler: (req: Request, ctx: C) => Promise<Response>) {
     }
   });
 }
+
+// The spectate routes are the Table's raw JSON: people watch a match on
+// Unprompted's /play, so a search engine should index that page, not this.
+// Set on every answer, the 404 for an unknown or private id included.
+export function unindexed<C>(
+  handler: (req: Request, ctx: C) => Promise<Response>,
+) {
+  const inner = route(handler);
+  return async (req: Request, ctx: C): Promise<Response> => {
+    const res = await inner(req, ctx);
+    res.headers.set("X-Robots-Tag", "noindex");
+    return res;
+  };
+}

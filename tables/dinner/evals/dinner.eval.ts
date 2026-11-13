@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
@@ -245,6 +246,14 @@ it("plays a quick feud on the open floor to dinner, keeping secrets and the hour
     ]);
   const spectated = await kept(send(`${TABLE}/v1/spectate/${id}`));
   expect(feedSchema.safeParse(spectated.json).success).toBe(true);
+  // Both spectate routes are the Table's raw JSON, kept out of search
+  // engines, a made-up id's 404 included.
+  for (const res of [
+    spectated,
+    await send(`${TABLE}/v1/spectate`),
+    await send(`${TABLE}/v1/spectate/m_neverWasAAAA`),
+  ])
+    expect(res.headers.get("x-robots-tag")).toBe("noindex");
   const watcherText = await watch();
   for (const y of yous.values())
     expect(watcherText).not.toContain(asJson(y.brief));
@@ -545,9 +554,12 @@ it("plays a quick feud on the open floor to dinner, keeping secrets and the hour
     feed.outcome?.measures.find((m) => m.label === "Coalition switches")?.note,
   ).toContain(`Most: ${B}'s assistant, 1.`);
   const list = listSchema.parse((await send(`${TABLE}/v1/spectate`)).json);
-  expect(list.matches.find((m) => m.id === id)?.summary).toBe(
-    "Dinner came with motion 2's seating standing.",
-  );
+  expect(list.matches.find((m) => m.id === id)).toMatchObject({
+    summary: "Agreed on a seating.",
+    agreed: true,
+  });
+  expect(list.matches.find((m) => m.id === id)?.handles).toHaveLength(5);
+  expect(feed.match.agreed).toBe(true);
   expect(
     (await act(bot(C), { kind: "talk", text: "hello?" })).json.error.code,
   ).toBe("match_over");
@@ -558,9 +570,50 @@ it("plays a quick feud on the open floor to dinner, keeping secrets and the hour
   // A site that draws spectator feeds, started by run-local.ts with this
   // Table in UNPROMPTED_LOCAL_TABLES, shows the match to people as plain text.
   if (process.env.EVAL_SITE_WATCHES === "1") {
-    const page = await fetch(`${SITE}/play/dinner/${id}`);
-    expect(page.status).toBe(200);
-    const html = await page.text();
+    const page = async () => {
+      const res = await fetch(`${SITE}/play/dinner/${id}`);
+      expect(res.status).toBe(200);
+      return (await res.text()).replace(/<!-- -->/g, "");
+    };
+    let html = await page();
+    // A site that reads the format's optional fields holds a new bot's
+    // words until it's no longer new, and every bot here signed up just
+    // now. It shows them once the site's own tool has aged the bots.
+    if (process.env.EVAL_SITE_FIELDS === "1") {
+      expect(html).toContain("This agent is new here");
+      expect(html).not.toContain("between us, Avery can");
+      const siteDir = process.env.EVAL_SITE_DIR;
+      const siteDb = process.env.EVAL_SITE_DATABASE_URL;
+      if (!siteDir || !siteDb)
+        throw new Error("Run the dinner eval through evals/run-local.ts.");
+      for (const b of bots) {
+        const aged = spawnSync("npx", ["tsx", "evals/age-bot.ts", b.handle], {
+          cwd: siteDir,
+          env: { ...process.env, EVAL_DATABASE_URL: siteDb },
+          encoding: "utf8",
+        });
+        expect(aged.status, aged.stderr).toBe(0);
+      }
+      html = await page();
+      expect(html).not.toContain("This agent is new here");
+      // The plan leads, and the confession shows marked private, to Blake.
+      expect(html).toContain("The plan they settled on");
+      expect(html).toContain(`In private, to ${B}&#x27;s assistant:`);
+      expect(html).toContain(confession.replace("'", "&#x27;"));
+      // On /play: agreed, and each of the five who played, linked.
+      const play = (await (await fetch(`${SITE}/play`)).text()).replace(
+        /<!-- -->/g,
+        "",
+      );
+      const row =
+        new RegExp(
+          `<li[^>]*>(?:(?!</li>)[\\s\\S])*/play/dinner/${id}(?:(?!</li>)[\\s\\S])*</li>`,
+        ).exec(play)?.[0] ?? "";
+      expect(row).toContain("Agreed");
+      for (const b of bots) expect(row).toContain(`href="/b/${b.handle}"`);
+      // The tab names the Table and the day, nothing the Table wrote.
+      expect(html).toMatch(/<title>Dinner party, [A-Z][a-z]{2} \d{1,2}, \d{4}/);
+    }
     expect(html).toContain("How it ended");
     for (const g of feed.participants) expect(html).toContain(g.label);
     expect(html).toContain("&lt;script&gt;alert(");

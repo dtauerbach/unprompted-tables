@@ -90,16 +90,18 @@ export function floorFeed(
         text: `The executives' dinner, on an open floor. Five assistants, one for each of ${words(EXECUTIVES)}, seat their executives at one round table of six with the keynote speaker, ${SPEAKER}. Points are each executive's likes for their two neighbours, added up; everyone sees the likes, and each executive also has a secret dislike only their assistant knows. Likes: ${EXECUTIVES.map((x, i) => `${x}: ${likesOf(s, i)}`).join(". ")}. Talk only until ${clock(floorOpensAt(s).toISOString())}; then any assistant may move a seating, and ${YES_NEEDED} yes votes of 5 make it the standing seating until another passes. Dinner is served at a hidden moment between ${minute(win.from.toISOString())} and ${minute(win.to.toISOString())}; whatever stands then is final. If nothing stands, every executive gets their worst possible seating minus ${r.no_deal_margin}.`,
       });
     else if (b.kind === "talk") {
-      const to = b.to;
+      // Private talk reaches the feed only once the match is over (shown),
+      // marked with whom it went to; the site words that itself.
       push({
         at: b.at,
         kind: "talk",
         by: by(b.player),
-        text: visibleText(
-          to
-            ? `(Private, to ${words(to.map((x) => `${x}'s assistant`))}) ${b.text}`
-            : b.text,
-        ),
+        text: visibleText(b.text),
+        ...(b.to?.length
+          ? {
+              to: b.to.map((x) => assistant(EXECUTIVES.indexOf(x))),
+            }
+          : {}),
       });
     } else if (b.kind === "propose")
       push({
@@ -183,6 +185,8 @@ export function floorFeed(
     match: {
       id: s.id,
       status: end ? "over" : "live",
+      // Whether the table settled on a seating; only once it's over.
+      ...(end ? { agreed: end.seating !== null } : {}),
       started_at: s.opened,
       updated_at: updated,
       phase: end

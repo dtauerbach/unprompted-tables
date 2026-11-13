@@ -123,7 +123,11 @@ describe("the open floor over HTTP", () => {
     const lobby = (await call(lobbyRoute)).body.lobby as { seated: string[] };
     expect(lobby.seated).toEqual([spare.body.player]);
     const list = listSchema.parse((await call(spectateList)).body);
-    expect(list.matches.filter((m) => m.status === "live")).toHaveLength(1);
+    const live = list.matches.filter((m) => m.status === "live");
+    expect(live).toHaveLength(1);
+    // Who's playing, but not yet whether they'll agree.
+    expect(live[0]?.handles).toHaveLength(5);
+    expect(live[0] && "agreed" in live[0]).toBe(false);
   });
 
   it("describes the public rules, never the level, and the guide teaches the moves", async () => {
@@ -288,9 +292,12 @@ describe("the open floor over HTTP", () => {
     expect(feed.outcome?.reveals.length).toBe(5 + 1 + 1 + 1);
     expect(JSON.stringify(feed)).toContain(`I can't stand ${secret}`);
     const list = listSchema.parse((await call(spectateList)).body);
-    expect(list.matches[0]?.summary).toBe(
-      "Dinner came with motion 2's seating standing.",
-    );
+    expect(list.matches[0]).toMatchObject({
+      summary: "Agreed on a seating.",
+      agreed: true,
+      handles,
+    });
+    expect(feed.match.agreed).toBe(true);
     const late = await t.act(C, { kind: "talk", text: "hello?" });
     expect(late.body.error.code).toBe("match_over");
     const lateGuess = await t.act(C, {
@@ -498,9 +505,11 @@ describe("the open floor over HTTP", () => {
     }[];
     for (const x of r) expect(x.points).toBe(x.worst - 3);
     const list = listSchema.parse((await call(spectateList)).body);
-    expect(list.matches[0]?.summary).toBe(
-      "Dinner came with nothing standing: no deal.",
-    );
+    expect(list.matches[0]).toMatchObject({
+      summary: "Dinner came with no seating agreed.",
+      agreed: false,
+      handles,
+    });
   });
 });
 

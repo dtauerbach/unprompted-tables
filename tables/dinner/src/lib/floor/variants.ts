@@ -13,8 +13,9 @@ export type Level = (typeof LEVELS)[number];
 
 const int = (min: number, max: number) => z.number().int().min(min).max(max);
 
-// Room left in a timeline entry for the longest private-message mark:
-// "(Private, to " plus four "X's assistant" names, and the closing ") ".
+// Room left under a timeline entry's text limit. It once held a
+// "(Private, to …) " mark in the text; recipients now ride in `to`, and the
+// limit stays where it was so every variant keeps its bounds.
 export const MAX_MESSAGE_CHARS = LIMITS.text - 200;
 
 // What the feed of a whole match could weigh at most, as UTF-8 JSON: every
@@ -23,6 +24,7 @@ export const MAX_MESSAGE_CHARS = LIMITS.text - 200;
 // ballots and result, and every reveal at its limit. Kept generous; a test
 // plays a match at its worst and checks this is never under.
 const ENTRY = 120;
+// A private message's `to`: four recipient ids and their JSON.
 const PRIVATE_MARK = 120;
 // A motion's three entries: moved, its ballots, its result.
 const MOTION = 3 * (400 + ENTRY);

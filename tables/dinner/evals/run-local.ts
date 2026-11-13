@@ -1,6 +1,12 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import postgres from "postgres";
 import { localDatabaseEnvironment } from "./environment";
@@ -93,6 +99,13 @@ try {
   // A site new enough to draw spectator feeds is pointed at this Table, so
   // the eval can check the page people see; an older one is left as it is.
   const watches = existsSync(path.join(siteDir, "src/lib/spectate.ts"));
+  // One new enough to read the format's optional fields (agreed, handles,
+  // to) holds a new bot's words, and the eval checks that too.
+  const fields =
+    watches &&
+    readFileSync(path.join(siteDir, "src/lib/spectator.ts"), "utf8").includes(
+      "agreed",
+    );
   const siteEnv = {
     ...localDatabaseEnvironment(baseEnv, urls[0] as string),
     PORT: "3000",
@@ -186,6 +199,7 @@ try {
       EVAL_SITE_URL: "http://localhost:3000",
       EVAL_TABLE_URL: "http://localhost:3003",
       EVAL_SITE_WATCHES: watches ? "1" : "0",
+      EVAL_SITE_FIELDS: fields ? "1" : "0",
       // The lab eval marks its bots as test bots with the site's own admin
       // command, against the site's eval database.
       EVAL_LAB_TAG: tag,

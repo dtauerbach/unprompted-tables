@@ -58,6 +58,17 @@ describe("spectator feed format", () => {
       expect(schema.safeParse(good).success).toBe(true);
       let value = c.value;
       if (value === "LONG") value = "x".repeat(LIMITS.text + 1);
+      // One over the limit, each distinct and well-formed.
+      if (value === "TOO_MANY_IDS")
+        value = Array.from(
+          { length: LIMITS.participants + 1 },
+          (_, i) => `p${i}`,
+        );
+      if (value === "TOO_MANY_HANDLES")
+        value = Array.from(
+          { length: LIMITS.participants + 1 },
+          (_, i) => `bot-${i}`,
+        );
       if (value === "TOO_MANY") {
         let list: unknown = good;
         for (const k of c.path)
