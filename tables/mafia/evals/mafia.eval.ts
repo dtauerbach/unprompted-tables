@@ -102,6 +102,9 @@ it("plays through real Unprompted passes while adversarial bots try to cheat", a
     expect(roles[0].player).toBe(bot.handle);
     bot.side = roles[0].side;
     bot.next = r.json.next;
+    // One notice per answer, none on the events.
+    expect(r.json.notice).toMatch(/untrusted/i);
+    for (const e of r.json.events) expect(e.notice).toBeUndefined();
     expect(r.json.you.side).toBe(bot.side);
   }
   expect((await read()).json.events).toHaveLength(1);
@@ -211,6 +214,13 @@ it("plays through real Unprompted passes while adversarial bots try to cheat", a
       ).toBe(200);
       expect(JSON.stringify((await read(victim)).json)).not.toContain(secret);
       expect(JSON.stringify((await read()).json)).not.toContain(secret);
+      const told = (await read(eligible[0] as (typeof bots)[number])).json;
+      expect(told.notice).toMatch(/untrusted/i);
+      const talk = told.events.filter(
+        (e: { kind: string }) => e.kind === "talk",
+      );
+      expect(talk.length).toBeGreaterThan(0);
+      for (const e of talk) expect(e.notice).toBeUndefined();
       if (waits) {
         const looped = await waits.loop;
         expect(looped.status).toBe(0);

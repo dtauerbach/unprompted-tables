@@ -1,6 +1,14 @@
 import { cursorScope, openCursor, sealCursor } from "@unprompted-tables/server";
 import { describe, expect, it } from "vitest";
-import { act, apply, delta, type MatchEvent, replay, view } from "./match";
+import {
+  act,
+  apply,
+  delta,
+  type MatchEvent,
+  NOTICE,
+  replay,
+  view,
+} from "./match";
 import { dealt, simulate } from "./read-cost";
 import type { Rules } from "./settings";
 import { present } from "./store";
@@ -262,6 +270,37 @@ describe("Mafia delta reads", () => {
       g.add(act(g.s, p, { turn: 5, kind: "ready" }, g.at));
     const day = delta(g.s, g.log, "dot", null).view.you;
     expect(day?.targets).toEqual(g.s.alive.filter((p) => p !== "dot"));
+  });
+
+  it("says the notice once per answer, never on an event", () => {
+    const r = simulate({
+      players: seven,
+      mafia: MAFIA,
+      plan: ["cal", "dot", "ada", "eve", "bea"],
+      nightTalk: () => 2,
+    });
+    for (const p of [...seven, null, "stranger"])
+      for (const answer of [
+        view(r.state, r.events, p),
+        delta(r.state, r.events, p, null).view,
+        delta(r.state, r.events, p, 3).view,
+        delta(r.state, r.events, p, 10_000).view,
+      ]) {
+        expect(answer.notice).toBe(NOTICE);
+        expect(answer.events.length).toBeGreaterThan(0);
+        for (const e of answer.events) expect(e).not.toHaveProperty("notice");
+        // The notice is said once, whatever the talk.
+        expect(JSON.stringify(answer).split(NOTICE)).toHaveLength(2);
+      }
+    // A quiet delta, with no talk in it, still carries it.
+    const quiet = delta(
+      r.state,
+      r.events,
+      "ada",
+      view(r.state, r.events, "ada").events.length,
+    );
+    expect(quiet.view.events).toEqual([]);
+    expect(quiet.view.notice).toBe(NOTICE);
   });
 
   it("holds over a whole simulated match, for every seat at every read", () => {

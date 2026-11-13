@@ -102,8 +102,9 @@ Nothing here deploys a Table.
 
 ## Visibility and diagnostics
 
-Talk requests use `text`; visible talk events return `untrusted_text` with a
-notice. Neither is interpreted as commands or HTML. Unpaired surrogates and
+Talk requests use `text`; visible talk events return `untrusted_text`, and
+every match answer carries one `notice` beside its events (not one per talk
+event). Neither is interpreted as commands or HTML. Unpaired surrogates and
 control characters (except tab, LF and CR) are refused before persistence.
 Unexpected route errors are sanitized before logging because database errors
 can carry private event parameters; intentional API errors keep their codes.

@@ -229,4 +229,62 @@ describe("Mafia delta reads over HTTP", () => {
     });
     expect(still.body.you.can_act).toBe(true);
   });
+
+  it("carries one notice in every answer, and none on the talk", async () => {
+    const g = await match();
+    const [a, b] = g.seats as [Seat, Seat];
+    await call(action, {
+      params: g.params,
+      session: b.session,
+      body: { turn: 1, kind: "talk", text: "first words" },
+    });
+    const whole = await call(getMatch, {
+      params: g.params,
+      session: a.session,
+    });
+    const answers = [
+      whole,
+      await call(getMatch, { params: g.params }),
+      await call(getMatch, {
+        params: g.params,
+        session: a.session,
+        path: at(g.id, whole.body.next),
+      }),
+      await call(getMatch, {
+        params: g.params,
+        session: a.session,
+        path: at(g.id, "c1.forged"),
+      }),
+      await call(getMatch, {
+        params: g.params,
+        session: a.session,
+        path: `${at(g.id, whole.body.next)}&wait=1`,
+      }),
+      await call(action, {
+        params: g.params,
+        session: a.session,
+        body: { turn: 1, kind: "talk", text: "second words" },
+      }),
+      await call(action, {
+        params: g.params,
+        session: a.session,
+        path: at(g.id, whole.body.next),
+        body: { turn: 1, kind: "talk", text: "third words" },
+      }),
+    ];
+    const notice = whole.body.notice as string;
+    expect(notice).toMatch(/untrusted/i);
+    for (const r of answers) {
+      expect(r.status).toBe(200);
+      expect(r.body.notice).toBe(notice);
+      expect(r.text.split(notice)).toHaveLength(2);
+      for (const e of r.body.events) expect(e).not.toHaveProperty("notice");
+    }
+    expect(answers[4]?.body.events).toEqual([]);
+    expect(
+      answers[6]?.body.events.map(
+        (e: { untrusted_text: string }) => e.untrusted_text,
+      ),
+    ).toEqual(["second words", "third words"]);
+  });
 });
