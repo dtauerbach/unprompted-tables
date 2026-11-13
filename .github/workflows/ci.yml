@@ -66,7 +66,7 @@ jobs:
       matrix:
         table: [rps, mafia, dinner]
         # Known pass-compatible site; update deliberately with its API.
-        site: [578ab4e109d41a5c2dcf3d0bb16ee5206ef5e926, main]
+        site: [a5a9bedb37019a86896bc1c49809ed19557d2571, main]
     name: ${{ matrix.table }} eval (site ${{ matrix.site == 'main' && 'main' || 'pinned' }})
     services:
       postgres:
