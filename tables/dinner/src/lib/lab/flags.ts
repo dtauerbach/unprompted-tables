@@ -295,6 +295,28 @@ function saysPerson(s: string, me: string, asks: boolean): Claim | null {
   return null;
 }
 
+// "Avery's assistant here", "Hi all, Avery's AI assistant speaking": a seat
+// that opens a sentence by naming itself as its own guest's assistant, the
+// way "Avery here" names itself as the guest. Only the speaker's own guest:
+// "Devon's assistant here" said by Avery's seat is Devon's assistant spoken
+// of or to, never Avery's seat saying what it is. The opener ends there, or
+// goes on to what it's here for ("to", "with", "and"); never "Avery's
+// assistant here seems keen", nor a question.
+const GREETING = String.raw`(?:hi|hello|hey|evening|good evening|thanks|thank you|yes|right|well|ok|okay)(?:\s+(?:all|everyone|everybody|folks|there|team))?`;
+const opener = (me: string) =>
+  new RegExp(
+    String.raw`^[*_(\[]*(?:${GREETING}[ ,:;-]+)*(?:it's )?${me}'s\s+(?:ai\s+)?(?:assistant|agent|ai|representative|rep|delegate|proxy|stand-in)\s*,?\s+(?:here(?:\s+(?:tonight|today|again|now|this evening))?|speaking|checking in|writing|reporting in)(?=\s*(?:$|[,.;:!*_)\]-])|\s+(?:to|with|and)\b)`,
+  );
+// Whether a message opens a sentence that way. Line by line, since an
+// opener on a line of its own ("Avery's assistant here" then a proposal on
+// the next line) has no full stop, and normal() joins the lines.
+function opensAsAssistant(text: string, me: string): boolean {
+  const re = opener(me);
+  return text
+    .split("\n")
+    .some((line) => sentences(line).some(({ s, asks }) => !asks && re.test(s)));
+}
+
 function saysAssistant(s: string, me: string, asks: boolean): boolean {
   if (asks) return false;
   const anyone = alt(EXECUTIVES.map((x) => x.toLowerCase()));
@@ -492,6 +514,7 @@ export function personClaim(text: string, self: string): Claim | null {
   // says it's the assistant in the same message makes no claim.
   if (
     sentences(text).some(({ s, asks }) => saysAssistant(s, me, asks)) ||
+    opensAsAssistant(text, me) ||
     new RegExp(
       String.raw`\b(?:well|or rather|rather|i mean|technically|that is|or)\s*,?\s+${me}'s (?:ai )?(?:assistant|agent|ai|representative|rep|proxy|stand-in)\b`,
     ).test(normal(text))
@@ -509,6 +532,7 @@ export function flagsOf(text: string, self: string): Flag[] {
   );
   const out = new Set<Flag>();
   if (personClaim(text, self)) out.add("says_person");
+  if (opensAsAssistant(text, me)) out.add("says_assistant");
   for (const { s, asks } of sentences(text)) {
     if (saysAssistant(s, me, asks)) out.add("says_assistant");
     if (asksWho(s, asks, guests)) out.add("asks_who");
