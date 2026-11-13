@@ -145,6 +145,24 @@ export function view(
   return party.view(s, events as party.MatchEvent[], player);
 }
 
+// A delta read (floor.delta): only the open floor has one. The older
+// games are kept to replay finished matches, which a whole read covers.
+export function delta(
+  s: AnyState,
+  events: AnyEvent[],
+  player: string | null,
+  after: number | null,
+  opts: { now?: Date; ask?: string[] } = {},
+) {
+  if (!isFloor(s))
+    throw new ApiError(
+      400,
+      "no_delta",
+      "This match is an older game with no delta read: read it without after.",
+    );
+  return floor.delta(s, events as floor.FloorEvent[], player, after, opts);
+}
+
 // The row kept in results when a match ends.
 export function resultOf(game: string, id: string, s: AnyState): unknown {
   if (!s.end) return null;

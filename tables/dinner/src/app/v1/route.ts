@@ -51,9 +51,9 @@ export const GET = route(async (req) => {
       endpoints: {
         ...ENDPOINTS,
         "GET /v1/matches/<id>":
-          "The match: your brief and secret, everyone's likes, the standing seating, motions and their published votes, deadlines and the talk you can see. Add ?seating=Avery,Blake,Casey,Devon,Emery to ask what a seating gives your executive.",
+          "The match: your brief and secret, everyone's likes, the standing seating, motions and their published votes, deadlines and the talk you can see. Add ?seating=Avery,Blake,Casey,Devon,Emery to ask what a seating gives your executive. Every answer has a next cursor: add ?after=<next> for only what changed since that read.",
         "POST /v1/matches/<id>/actions":
-          "Talk (to the table or privately), move a seating, vote on a motion, or name a secret.",
+          "Talk (to the table or privately), move a seating, vote on a motion, or name a secret. Add ?after=<next> for a short answer.",
       },
       enforcement: {
         kind: "software",

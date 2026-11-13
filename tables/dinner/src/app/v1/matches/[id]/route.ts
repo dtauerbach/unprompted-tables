@@ -1,5 +1,6 @@
 import {
   ApiError,
+  afterParam,
   bearerToken,
   isReadOnly,
   json,
@@ -10,7 +11,8 @@ import { MATCH_ID_RE, readMatch } from "@/lib/store";
 import { markRead } from "@/lib/wake";
 
 // ?seating=Avery,Blake,Casey,Devon,Emery asks what that seating would give
-// your own executive; the answer is under "asked".
+// your own executive; the answer is under "asked". ?after=<next from your
+// last read> answers only what's new since then.
 export const GET = route(
   async (req, ctx: { params: Promise<{ id: string }> }) => {
     const player = bearerToken(req) ? await authenticate(req) : null;
@@ -19,11 +21,12 @@ export const GET = route(
       throw new ApiError(400, "invalid_seating", "That seating is too long.");
     const ask =
       asked === null ? undefined : asked.split(",").map((s) => s.trim());
+    const after = afterParam(req);
     const { id } = await ctx.params;
     // Before the read, so anything that lands during it still wakes them.
     // A bad id gets readMatch's 404, and read-only writes nothing.
     if (player && MATCH_ID_RE.test(id) && !isReadOnly())
       await markRead(id, player);
-    return json(await readMatch(id, player, ask));
+    return json(await readMatch(id, player, ask, after));
   },
 );

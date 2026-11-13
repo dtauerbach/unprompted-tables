@@ -1,8 +1,11 @@
 import { randomBytes } from "node:crypto";
 import {
   ApiError,
+  cursorScope,
   db,
   isReadOnly,
+  openCursor,
+  sealCursor,
   sweepLobby,
   type Tx,
 } from "@unprompted-tables/server";
@@ -11,8 +14,10 @@ import { logFailure } from "./diagnostics";
 import type { FloorVariant } from "./floor/variants";
 import {
   advance,
+  delta,
   due,
   fold,
+  isFloor,
   kindOf,
   type AnyEvent as MatchEvent,
   type AnyState as MatchState,
@@ -144,12 +149,39 @@ export async function readMatch(
   id: string,
   player: string | null,
   ask?: string[],
+  after?: string,
 ) {
   return seeMatch(
     id,
-    (state, events, at) => view(state, events, player, { now: at, ask }),
+    (state, events, at) =>
+      present(state, events, player, { now: at, ask }, after),
     player,
   );
+}
+
+// What a read answers: without `after`, the whole view as ever; with it,
+// a delta from the cursor it names, or the whole view marked resync if the
+// cursor isn't this reader's for this match. An open-floor answer carries
+// `next`, this reader's cursor for its next read. The count inside counts
+// only events this reader can see, so it moves with nothing hidden from
+// it, not even when dinner comes.
+export function present(
+  state: MatchState,
+  events: MatchEvent[],
+  player: string | null,
+  opts: { now?: Date; ask?: string[] },
+  after: string | undefined,
+) {
+  if (after === undefined && !isFloor(state))
+    return view(state, events, player, opts);
+  const scope = cursorScope(GAME, state.id, player);
+  const count = after === undefined ? null : openCursor(scope, after);
+  const d = delta(state, events, player, count, opts);
+  if (after === undefined) {
+    const { resync: _resync, ...whole } = d.view as { resync?: true };
+    return { ...whole, next: sealCursor(scope, d.seen) };
+  }
+  return { ...d.view, next: sealCursor(scope, d.seen) };
 }
 
 export async function seeMatch<T>(

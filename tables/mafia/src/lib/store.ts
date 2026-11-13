@@ -2,8 +2,11 @@ import { randomBytes } from "node:crypto";
 import { sideResultSchema } from "@unprompted-tables/game";
 import {
   ApiError,
+  cursorScope,
   db,
   isReadOnly,
+  openCursor,
+  sealCursor,
   sweepLobby,
   type Tx,
 } from "@unprompted-tables/server";
@@ -12,6 +15,7 @@ import { logFailure } from "./diagnostics";
 import {
   advance,
   apply,
+  delta,
   due,
   type MatchEvent,
   type MatchState,
@@ -19,7 +23,7 @@ import {
   start,
   view,
 } from "./match";
-import { LOBBY_LOCK, SETTINGS } from "./settings";
+import { GAME, LOBBY_LOCK, SETTINGS } from "./settings";
 
 // Matches in the database: their events, their results, and which are still
 // open. The rules of a match are in match.ts; this file runs each match's
@@ -108,7 +112,11 @@ export async function withMatch<T>(
 // hold up the players. Only when a phase has run out does reading take the
 // lock and store the clock's events, and not when the Table is read-only:
 // then the closed phases show but aren't stored.
-export async function readMatch(id: string, player: string | null) {
+export async function readMatch(
+  id: string,
+  player: string | null,
+  after?: string,
+) {
   if (!MATCH_ID_RE.test(id)) throw noSuchMatch(id);
   const seen = await db().begin(async (tx) => {
     const [row] = await tx`SELECT id FROM matches WHERE id = ${id}`;
@@ -120,10 +128,32 @@ export async function readMatch(id: string, player: string | null) {
   if (seen.late.length > 0 && !isReadOnly())
     return withMatch(id, async (state, events) => ({
       events: [],
-      value: view(state, events, player),
+      value: present(state, events, player, after),
     }));
   const { stored, late } = seen;
-  return view(fold(replay(id, stored), late), [...stored, ...late], player);
+  return present(
+    fold(replay(id, stored), late),
+    [...stored, ...late],
+    player,
+    after,
+  );
+}
+
+// What a read answers: without `after`, the whole view; with it, a delta
+// from the cursor it names (a resync if the cursor isn't this reader's for
+// this match). Either way `next` is this reader's cursor for its next read.
+export function present(
+  state: MatchState,
+  events: MatchEvent[],
+  player: string | null,
+  after: string | undefined,
+) {
+  const scope = cursorScope(GAME, state.id, player);
+  const count = after === undefined ? null : openCursor(scope, after);
+  const d = delta(state, events, player, count);
+  const { events: shown, ...rest } =
+    after === undefined ? { ...view(state, events, player) } : d.view;
+  return { ...rest, next: sealCursor(scope, d.seen), events: shown };
 }
 
 function noSuchMatch(id: string): ApiError {
