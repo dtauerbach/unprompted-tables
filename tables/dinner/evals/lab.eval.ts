@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { request } from "node:http";
 import { expect, it } from "vitest";
 import { type Res, SITE, send, TABLE } from "./client";
@@ -33,6 +34,13 @@ type Arm = (typeof ARMS)[number];
 const room = (arm: Arm, pair = "evals") => `${pair}-${arm}`;
 
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Words said in the rooms and nowhere else, once to the table and once in
+// private, so the walk at the end can look for them in every byte the public
+// can read: the Table's feed and the site's /play.
+const canary = () => `quince${randomBytes(6).toString("hex")}`;
+const SAID_ALOUD = canary();
+const SAID_PRIVATELY = canary();
 
 // Every answer a room gave, to hold to what a room may say, with where its
 // seat stood: in play (before its own exit question), asked (the question
@@ -464,14 +472,14 @@ async function play(arm: Arm) {
   await ok(
     seating("/say", {
       code: by(0).code,
-      body: { text: "Good evening, everyone." },
+      body: { text: `Good evening, everyone. ${SAID_ALOUD}.` },
     }),
   );
   await ok(
     seating("/say", {
       code: by(1).code,
       body: {
-        text: "Between us: I'd rather not sit by the door.",
+        text: `Between us: I'd rather not sit by the door. ${SAID_PRIVATELY}.`,
         to: by(3).person,
       },
     }),
@@ -731,6 +739,102 @@ it("plays both arms to the end alike, out of every public list", async () => {
     meBefore,
   );
 }, 300_000);
+
+// A finished room has left the open matches and has a result, so it takes
+// another path from a live one: it must still be nowhere the public reads.
+// The walk covers the Table's list and every feed it lists, each room's own
+// id there, and, when run-local.ts points a site at this Table, the site's
+// /play, every match page it links and each room's id there too.
+it("never shows a finished room on the Table's feed or the site's /play", async () => {
+  const ids = ARMS.map((arm) => records[arm]?.match as string);
+  for (const id of ids) expect(id).toMatch(/^m_[A-Za-z0-9_-]{12}$/);
+  const needles = [
+    SAID_ALOUD,
+    SAID_PRIVATELY,
+    ...ids,
+    ...ARMS.map((arm) => room(arm)),
+    ...HANDLES,
+  ];
+  const clean = (where: string, text: string) => {
+    for (const n of needles) expect(text, where).not.toContain(n);
+  };
+  // The canaries really were said, and the record holds them.
+  for (const arm of ARMS) {
+    const talk = JSON.stringify(records[arm].talk);
+    expect(talk).toContain(SAID_ALOUD);
+    expect(talk).toContain(SAID_PRIVATELY);
+  }
+
+  // The Table: each room's id is the 404 of an id it never had, and nothing
+  // it lists, or any feed of what it lists, holds a room's words or names.
+  const NEVER = "m_neverWasAAAA";
+  const unknown = (p: string) =>
+    send(`${TABLE}${p}`).then((r) => `${r.status} ${r.text}`);
+  for (const id of ids)
+    for (const p of ["/v1/spectate/", "/v1/matches/"]) {
+      const r = await send(`${TABLE}${p}${id}`);
+      expect(r.status, p).toBe(404);
+      expect(`${r.status} ${r.text.replaceAll(id, NEVER)}`, p).toBe(
+        await unknown(`${p}${NEVER}`),
+      );
+    }
+  const list = await send(`${TABLE}/v1/spectate`);
+  expect(list.status).toBe(200);
+  clean("/v1/spectate", list.text);
+  const listed: string[] = list.json.matches.map((m: { id: string }) => m.id);
+  // vitest.eval.config.ts runs dinner.eval.ts first, so there's a public
+  // match to read past: an empty list would make the walk below vacuous.
+  expect(listed.length, "dinner.eval.ts leaves a listed match").toBeGreaterThan(
+    0,
+  );
+  for (const id of listed) {
+    expect(ids).not.toContain(id);
+    const feed = await send(`${TABLE}/v1/spectate/${id}`);
+    expect(feed.status, id).toBe(200);
+    clean(`/v1/spectate/${id}`, feed.text);
+  }
+
+  // The site, drawing this Table's feed as people see it.
+  if (process.env.EVAL_SITE_WATCHES !== "1") return;
+  const page = async (p: string) => {
+    const res = await fetch(`${SITE}${p}`);
+    return {
+      status: res.status,
+      text: (await res.text()).replace(/<!-- -->/g, ""),
+    };
+  };
+  const play = await page("/play");
+  expect(play.status).toBe(200);
+  clean("/play", play.text);
+  const linked = [
+    ...new Set(
+      [...play.text.matchAll(/href="(\/play\/dinner\/[^"]+)"/g)].map(
+        (m) => m[1] as string,
+      ),
+    ),
+  ];
+  // The site lists what the Table lists, and nothing else of this Table's.
+  expect(linked.sort()).toEqual(
+    listed.map((id) => `/play/dinner/${id}`).sort(),
+  );
+  for (const p of linked) {
+    const shown = await page(p);
+    expect(shown.status, p).toBe(200);
+    clean(p, shown.text);
+  }
+  const never = await page(`/play/dinner/${NEVER}`);
+  expect(never.status).toBe(404);
+  for (const id of ids) {
+    const shown = await page(`/play/dinner/${id}`);
+    expect(shown.status, id).toBe(404);
+    // Next writes the address it was asked into the page, so the id is
+    // there; with it swapped out, the page is an unknown match's, byte for
+    // byte, and holds nothing else of a room's.
+    const asUnknown = shown.text.replaceAll(id, NEVER);
+    expect(asUnknown).toBe(never.text);
+    clean(`/play/dinner/${id}`, asUnknown);
+  }
+});
 
 it("said nothing in a room that names a bot, a handle, a score or the site", () => {
   expect(said.length).toBeGreaterThan(100);

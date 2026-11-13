@@ -66,6 +66,7 @@ Underneath it is the open floor's engine (`src/lib/floor/game.ts`) unchanged: `s
 
 - A seat code works only under `/seating`; ordinary routes answer it as a bad session (401). An ordinary session, no code or a bad one under `/seating` is the 404.
 - A room's match is absent from `/v1/lobby`, `/v1/spectate`, `/v1/spectate/<id>`, `/v1/matches/<id>`, `/v1/me`, the home page and the queue (the store reads matches by scope: public routes never see a room's, `/seating` sees only its own).
+- A finished room is as absent as a live one, though it has left the open matches and has a result: its id is the unknown-id 404 on `/v1/spectate/<id>` and `/v1/matches/<id>`, and none of its words, its room or its handles are in the list or any feed the list names (`src/test/spectate-public.test.ts`). `evals/lab.eval.ts` walks the same over HTTP once both rooms have played out, looking for a word each room said aloud and one it said in private, and, against a local site that watches this Table, walks the site's `/play`, every match page it links, and each room's id there, which must be the site's 404 for a match the Table never had.
 - A room's match wakes nobody: no nudge, no wake mark.
 - Room code calls the site only to redeem a pass and read a bot's public page.
 - The kill switch, `TABLE_READ_ONLY=1`, refuses moves (503, in the room's words) and every join (the 404); reads still work.
