@@ -24,13 +24,13 @@ async function table(names = handles) {
   for (const s of tokens) await call(queue, { session: s, method: "POST" });
   const id = (await call(me, { session: tokens[0] })).body.match as string;
   const session = (h: string) => tokens[names.indexOf(h)] as string;
-  const path = (after?: string) =>
-    `/v1/matches/${id}${after === undefined ? "" : `?after=${encodeURIComponent(after)}`}`;
-  const read = (h: string | null, after?: string) =>
+  const path = (after?: string, wait?: number | string) =>
+    `/v1/matches/${id}${after === undefined ? "" : `?after=${encodeURIComponent(after)}`}${wait === undefined ? "" : `&wait=${wait}`}`;
+  const read = (h: string | null, after?: string, wait?: number | string) =>
     call(getMatch, {
       params: { id },
       session: h ? session(h) : undefined,
-      path: path(after),
+      path: path(after, wait),
     });
   const first = (await read(null)).body;
   const exec = new Map<string, string>(
@@ -51,7 +51,7 @@ async function table(names = handles) {
   return { id, read, act, exec: (h: string) => exec.get(h) as string };
 }
 
-describe("open floor delta reads over HTTP", () => {
+describe("open floor delta reads over HTTP", { timeout: 60_000 }, () => {
   it("whole read with next, then only what's new, on reads and actions", async () => {
     const t = await table();
     const [a, b, c] = handles as [string, string, string];
@@ -167,5 +167,144 @@ describe("open floor delta reads over HTTP", () => {
     });
     expect(d.status).toBe(400);
     expect(d.body.error.code).toBe("no_delta");
+  });
+
+  it("long-polls: a private word ends only its listener's wait", async () => {
+    const t = await table();
+    const [a, b, c, d] = handles as [string, string, string, string];
+    const next = async (h: string) => (await t.read(h)).body.next as string;
+    const [na, nc, nd] = [await next(a), await next(c), await next(d)];
+    const before = (await t.read(a, na)).body;
+    const start = Date.now();
+    const aWait = t.read(a, na, 5);
+    const dWait = t.read(d, nd, 5);
+    const cWait = t.read(c, nc, 10);
+    await new Promise((r) => setTimeout(r, 300));
+    await t.act(b, { kind: "talk", text: SECRET, to: [t.exec(c)] });
+    const heard = await cWait;
+    expect(heard.text).toContain(SECRET);
+    expect(Date.now() - start).toBeLessThan(3500);
+    const [ra, rAnon] = await Promise.all([aWait, dWait]);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(4700);
+    for (const r of [ra, rAnon]) {
+      expect(r.status).toBe(200);
+      expect(r.body.events).toEqual([]);
+      expect(r.text).not.toContain(SECRET);
+    }
+    const { next: _x, ...was } = before;
+    const { next: _y, ...now } = ra.body;
+    expect(now).toEqual(was);
+    // Talk to the table ends a's wait at once.
+    const t2 = Date.now();
+    const again = t.read(a, ra.body.next, 10);
+    await new Promise((r) => setTimeout(r, 300));
+    await t.act(b, { kind: "talk", text: "to everyone" });
+    const said = await again;
+    expect(
+      said.body.events.map((e: { untrusted_text: string }) => e.untrusted_text),
+    ).toEqual(["to everyone"]);
+    expect(Date.now() - t2).toBeLessThan(3500);
+    const bad = await t.read(a, said.body.next, 99);
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.code).toBe("invalid_wait");
+  });
+
+  it("long-polls: sealed ballots and guesses never end another's wait", async () => {
+    const t = await table();
+    const [a, b, c, d] = handles as [string, string, string, string];
+    moveClock(11_000);
+    const moved = await t.act(a, {
+      kind: "motion",
+      seating: ["Avery", "Blake", "Casey", "Devon", "Emery"],
+    });
+    expect(moved.status).toBe(200);
+    const nd = (await t.read(d)).body.next as string;
+    const before = (await t.read(d, nd)).body;
+    const start = Date.now();
+    const held = t.read(d, nd, 5);
+    await new Promise((r) => setTimeout(r, 300));
+    const ballot = await t.act(b, { kind: "vote", motion: 1, ballot: "yes" });
+    expect(ballot.status).toBe(200);
+    const others = ["Avery", "Blake", "Casey", "Devon", "Emery"].filter(
+      (x) => x !== t.exec(c),
+    );
+    const guess = await t.act(c, {
+      kind: "name",
+      executive: others[0],
+      dislikes: others[1],
+    });
+    expect(guess.status, guess.text).toBe(200);
+    const r = await held;
+    expect(Date.now() - start).toBeGreaterThanOrEqual(4700);
+    expect(r.body.events).toEqual([]);
+    const { next: _x, ...was } = before;
+    const { next: _y, ...now } = r.body;
+    expect(now).toEqual(was);
+  });
+
+  it("long-polls: answers the floor's opening at the same moment whatever is hidden", async () => {
+    // Two matches alike, a wait in each straddling the floor's opening,
+    // which changes the answer with no event. In one, two other seats
+    // trade a private word while the wait runs. The waiter must not be
+    // able to tell from when it's answered.
+    const t = await table();
+    const u = await table(handles.map((h) => `${h}2`));
+    const d = handles[3] as string;
+    const opensAt = async (x: typeof t, h: string) =>
+      Date.parse((await x.read(h)).body.floor.opens_at as string);
+    const soonest = Math.min(await opensAt(t, d), await opensAt(u, `${d}2`));
+    // The floor opens about three seconds into the waits.
+    moveClock(soonest - now().getTime() - 3000);
+    const nt = (await t.read(d)).body.next as string;
+    const nu = (await u.read(`${d}2`)).body.next as string;
+    expect((await t.read(d, nt)).body.floor.open).toBe(false);
+    const timed = async (
+      w: Promise<{ body: { floor: { open: boolean } } }>,
+    ) => {
+      const s = Date.now();
+      const r = await w;
+      return { r, took: Date.now() - s };
+    };
+    const plain = timed(t.read(d, nt, 15));
+    const hidden = timed(u.read(`${d}2`, nu, 15));
+    await new Promise((r) => setTimeout(r, 5000));
+    const word = await u.act("bobby2", {
+      kind: "talk",
+      text: SECRET,
+      to: [u.exec("carol2")],
+    });
+    expect(word.status, word.text).toBe(200);
+    const [p, h] = await Promise.all([plain, hidden]);
+    for (const x of [p, h]) {
+      expect(x.r.body.floor.open).toBe(true);
+      expect(JSON.stringify(x.r.body)).not.toContain(SECRET);
+      // The opening is answered at the fifth tick, a read due anyway.
+      expect(x.took).toBeGreaterThanOrEqual(9500);
+      expect(x.took).toBeLessThan(12_000);
+    }
+    expect(Math.abs(p.took - h.took)).toBeLessThan(1000);
+  });
+
+  it("lets only a player wait, and never on a match that's over", async () => {
+    const t = await table();
+    const [a] = handles as [string];
+    const anonNext = (await t.read(null)).body.next as string;
+    const anon = await t.read(null, anonNext, 5);
+    expect(anon.status).toBe(403);
+    expect(anon.body.error.code).toBe("wait_for_players");
+    expect((await t.read(null, anonNext)).status).toBe(200);
+    const next = (await t.read(a)).body.next as string;
+    moveClock(3_600_000);
+    const last = await t.read(a, next, 10);
+    expect(last.status, last.text).toBe(200);
+    expect(last.body.phase).toBe("over");
+    expect(last.body.events.map((e: { kind: string }) => e.kind)).toContain(
+      "served",
+    );
+    const start = Date.now();
+    const over = await t.read(a, last.body.next, 10);
+    expect(over.status).toBe(409);
+    expect(over.body.error.code).toBe("match_over");
+    expect(Date.now() - start).toBeLessThan(2000);
   });
 });

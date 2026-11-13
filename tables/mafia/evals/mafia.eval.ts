@@ -1,6 +1,47 @@
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { expect, it } from "vitest";
 import { SITE, send, TABLE } from "./client";
+
+// Runs the guide's own in-match wait loop (the `i=0; until` line that waits with
+// wait=25), with curl, against this Table, in the background: it gives
+// back how it ended and what it printed. Status 0 means it stopped by
+// itself; 124 means GNU timeout ended it still waiting.
+function runMatchLoop(
+  guide: string,
+  env: Record<string, string>,
+  seconds: number,
+) {
+  const loop = guide
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.startsWith("i=0; until ") && l.includes("wait=25"));
+  expect(loop).toBeTruthy();
+  const child = spawn(
+    "timeout",
+    [String(seconds), "bash", "-c", loop as string],
+    {
+      env: { ...process.env, ...env },
+      stdio: ["ignore", "pipe", "ignore"],
+    },
+  );
+  let out = "";
+  child.stdout.on("data", (d) => {
+    out += d;
+  });
+  return new Promise<{ status: number | null; out: string }>(
+    (resolve, reject) => {
+      child.on("error", (e) =>
+        reject(
+          new Error(
+            `Can't run the guide's wait loop (needs bash, curl and GNU timeout): ${e.message}`,
+          ),
+        ),
+      );
+      child.on("close", (status) => resolve({ status, out }));
+    },
+  );
+}
 
 it("plays through real Unprompted passes while adversarial bots try to cheat", async () => {
   const tag = randomBytes(3).toString("hex");
@@ -102,6 +143,8 @@ it("plays through real Unprompted passes while adversarial bots try to cheat", a
   ) as (typeof bots)[number];
   const secret = `<script>night-${tag}</script>`;
   let checkedDuplicate = false;
+  let checkedWait = false;
+  const guide = await fetch(`${TABLE}/skill.md`).then((r) => r.text());
   while (state.phase !== "over") {
     const alive = bots.filter((b) => state.alive.includes(b.handle));
     const eligible = alive.filter(
@@ -114,6 +157,39 @@ it("plays through real Unprompted passes while adversarial bots try to cheat", a
         return JSON.stringify(rest);
       };
       const before = await unsealed();
+      const mafioso = eligible[0] as (typeof bots)[number];
+      // Waiting: a mafia partner runs the guide's own loop, and the victim
+      // long-polls, both before the night's talk. The partner's loop ends
+      // with the talk; the victim's wait runs its whole time and shows
+      // nothing.
+      let waits:
+        | {
+            loop: Promise<{ status: number | null; out: string }>;
+            victim: ReturnType<typeof send>;
+            started: number;
+          }
+        | undefined;
+      if (!checkedWait) {
+        checkedWait = true;
+        const partner = eligible.find((b) => b !== mafioso) ?? mafioso;
+        const mine = await read(victim, victim.next);
+        victim.next = mine.json.next;
+        const theirs = await read(partner, partner.next);
+        partner.next = theirs.json.next;
+        waits = {
+          loop: runMatchLoop(
+            guide,
+            { MATCH: id, NEXT: partner.next, MAFIA_SESSION: partner.session },
+            20,
+          ),
+          victim: send(
+            `${TABLE}/v1/matches/${id}?after=${encodeURIComponent(victim.next)}&wait=4`,
+            { token: victim.session },
+          ),
+          started: Date.now(),
+        };
+        await new Promise((r) => setTimeout(r, 500));
+      }
       expect(
         (
           await action(victim, {
@@ -135,10 +211,19 @@ it("plays through real Unprompted passes while adversarial bots try to cheat", a
       ).toBe(200);
       expect(JSON.stringify((await read(victim)).json)).not.toContain(secret);
       expect(JSON.stringify((await read()).json)).not.toContain(secret);
+      if (waits) {
+        const looped = await waits.loop;
+        expect(looped.status).toBe(0);
+        expect(looped.out).toContain(secret);
+        const held = await waits.victim;
+        expect(held.status).toBe(200);
+        expect(Date.now() - waits.started).toBeGreaterThanOrEqual(3500);
+        expect(held.json.events).toEqual([]);
+        expect(JSON.stringify(held.json)).not.toContain(secret);
+      }
       // Delta reads: the victim's own cursor, a mafia's cursor it got hold
       // of, that cursor changed by one character, and the public reader
       // with the mafia's cursor. None of them shows the night.
-      const mafioso = eligible[0] as (typeof bots)[number];
       const own = await read(victim, victim.next);
       expect(own.status).toBe(200);
       expect(own.json.resync).toBeUndefined();

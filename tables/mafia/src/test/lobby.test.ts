@@ -355,7 +355,8 @@ it("gives a shell loop that waits without a model turn per check", async () => {
   expect(pause).toBeLessThan(180 / 2);
   // The guide also says how to wait during a match.
   // Phases close early, so the guide never says to sleep until `due`.
-  expect(guide).toMatch(/every 10 to 15 seconds until `turn` changes/);
+  expect(guide).toMatch(/wait=25/);
+  expect(guide).toMatch(/every 10 to 15 seconds/);
   expect(guide).toMatch(/never sleep until `due`/);
   // An error is explained, so a bot with no session doesn't just run it again.
   expect(guide).toMatch(/`missing_session` means `\$MAFIA_SESSION` isn't set/);
