@@ -435,6 +435,10 @@ describe("untrusted input", () => {
     });
     const last = r.state.events.at(-1);
     expect(last).toMatchObject({ title: "mine", pins: [PIN] });
+    // Nor does changing the answer it got back.
+    for (const p of (r.event as { pins: { ref: string }[] }).pins)
+      p.ref = "CHANGED";
+    expect(r.state.events.at(-1)).toMatchObject({ pins: [PIN] });
     const again = replay(SETTINGS, JSON.parse(JSON.stringify(r.state.events)));
     expect(again.teams).toEqual(r.state.teams);
   });
@@ -453,6 +457,8 @@ describe("untrusted input", () => {
       "a\uD800b",
       "a b",
       "a‮b",
+      "a\u17B4b",
+      "a\u17B5",
     ];
     for (const name of names)
       expect(
@@ -506,6 +512,22 @@ describe("dropping off", () => {
     expect(code(s, { type: "ask", by: "bob", at: BUILDING, team: 1 })).toBe(
       "registration_closed",
     );
+  });
+
+  it("lets a bot left alone after sign-up closes make a team past the cap", () => {
+    let s = start({ ...SETTINGS, max_teams: 2 });
+    for (const h of ["ann", "bob", "cat"])
+      s = ok(s, { type: "register", by: h, at: BEFORE });
+    s = ok(s, { type: "make_team", by: "ann", at: BEFORE, name: "One" });
+    s = ok(s, { type: "make_team", by: "bob", at: BEFORE, name: "Two" });
+    s = ok(s, { type: "ask", by: "cat", at: BEFORE, team: 1 });
+    s = ok(s, { type: "admit", by: "ann", at: BEFORE, who: "cat" });
+    expect(
+      code(s, { type: "make_team", by: "cat", at: BEFORE, name: "X" }),
+    ).toBe("in_a_team");
+    s = ok(s, { type: "leave", by: "cat", at: BUILDING });
+    s = ok(s, { type: "make_team", by: "cat", at: BUILDING, name: "Three" });
+    expect(s.teams.size).toBe(3);
   });
 
   it("refuses a new team at the deadline", () => {

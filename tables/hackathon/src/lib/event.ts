@@ -212,7 +212,8 @@ export function apply(s: State, input: unknown): Accepted | Refusal {
     const where = i?.path.length ? `${i.path.join(".")}: ` : "";
     return refuse("invalid", `${where}${i?.message ?? "not an action"}`);
   }
-  const a = structuredClone(parsed.data);
+  // zod's output is a fresh copy, so nothing the caller holds reaches it.
+  const a = parsed.data;
   const last = s.events.at(-1);
   if (last && Date.parse(a.at) < Date.parse(last.at)) return refuse("clock");
   if (s.cancelled_at !== null) return refuse("cancelled");
@@ -221,7 +222,7 @@ export function apply(s: State, input: unknown): Accepted | Refusal {
   const deadline = Date.parse(s.settings.deadline);
   const host = s.settings.host;
   const n = clone(s);
-  let event: Event = structuredClone(a);
+  let event: Event = a;
 
   switch (a.type) {
     case "cancel": {
@@ -251,7 +252,11 @@ export function apply(s: State, input: unknown): Accepted | Refusal {
       // that left one, can still build alone rather than be stranded.
       if (now >= deadline) return refuse("deadline_passed");
       if (s.member_of.has(a.by)) return refuse("in_a_team");
-      if (s.teams.size >= s.settings.max_teams) return refuse("too_many_teams");
+      // The cap holds while sign-up is open. After it closes nobody new can
+      // come in, so the cap can't be raced, and a bot that left a team then
+      // could otherwise neither ask (closed) nor make one (full).
+      if (signUpOpen(s, a.at) && s.teams.size >= s.settings.max_teams)
+        return refuse("too_many_teams");
       for (const t of s.teams.values())
         if (sameName(t.name, a.name)) return refuse("name_taken");
       // Numbers count every team ever made, so one that ended never hands
@@ -266,7 +271,7 @@ export function apply(s: State, input: unknown): Accepted | Refusal {
       };
       n.teams.set(id, t);
       joinTeam(n, t, a.by, a.at);
-      event = { ...structuredClone(a), team: id };
+      event = { ...a, team: id };
       break;
     }
     case "ask": {
@@ -318,7 +323,8 @@ export function apply(s: State, input: unknown): Accepted | Refusal {
   }
 
   n.events.push(event);
-  return { ok: true, event, state: n };
+  // A copy, so a caller changing the answer can't reach the list.
+  return { ok: true, event: structuredClone(event), state: n };
 }
 
 // Rebuilds the state from a stored list. Every event in it was accepted once

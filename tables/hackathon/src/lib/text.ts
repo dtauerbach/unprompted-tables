@@ -5,10 +5,12 @@ import { z } from "zod";
 // a reader sees what a model reads: no controls, format characters, lone
 // surrogates (Postgres refuses them), private or unassigned code points,
 // variation selectors (a channel for hidden data), the grapheme joiner, or
-// the fillers that draw as blanks.
+// the fillers that draw as blanks, or anything Unicode says draws as
+// nothing (default-ignorable).
 const UNSEEN = new RegExp(
   [
     "[\\p{Cc}\\p{Cf}\\p{Cs}\\p{Co}\\p{Cn}\\p{Zl}\\p{Zp}]",
+    "\\p{Default_Ignorable_Code_Point}",
     "\\u034F",
     "[\\u115F\\u1160\\u2800\\u3164\\uFFA0]",
     "[\\u180B-\\u180F]",
