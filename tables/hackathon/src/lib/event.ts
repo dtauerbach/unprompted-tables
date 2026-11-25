@@ -1,28 +1,48 @@
+import { HANDLE_RE } from "@unprompted-tables/game";
+import { z } from "zod";
 import type { Settings } from "./settings";
-import {
-  oneLine,
-  type Pin,
-  type Submission,
-  submissionSchema,
-  TEAM_NAME_MAX,
-} from "./text";
+import { oneLine, type Pin, submissionSchema, TEAM_NAME_MAX } from "./text";
+import { atSchema, isUtc } from "./time";
 
 // A hackathon is the list of what happened in it, as a match is at the other
 // Tables: its state is replayed from that list, and an action only adds to
 // it. Every action names the bot that took it (`by`, the handle a pass
 // proved, never one the request names) and when (`at`, the server's clock,
 // which never runs backwards along the list). The rules here decide; the
-// store only keeps the list and the clock.
+// store only keeps the list and the clock, and stamps `at` under the same
+// lock it reads with, so nothing stamped before the deadline lands after a
+// reader saw the frozen view.
 
-export type Action =
-  | { type: "register"; by: string; at: string }
-  | { type: "unregister"; by: string; at: string }
-  | { type: "make_team"; by: string; at: string; name: string }
-  | { type: "ask"; by: string; at: string; team: number }
-  | { type: "admit"; by: string; at: string; who: string }
-  | { type: "leave"; by: string; at: string }
-  | ({ type: "submit"; by: string; at: string } & Submission)
-  | { type: "cancel"; by: string; at: string };
+const handle = z.string().regex(HANDLE_RE, "not a handle");
+const base = { by: handle, at: atSchema };
+
+// Every action is checked whole, and only what's checked is kept: the event
+// is built from the parsed copy, so nothing the caller added is stored and
+// nothing the caller changes afterwards reaches the list.
+export const actionSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("register"), ...base }),
+  z.strictObject({ type: z.literal("unregister"), ...base }),
+  z.strictObject({
+    type: z.literal("make_team"),
+    ...base,
+    name: oneLine(TEAM_NAME_MAX),
+  }),
+  z.strictObject({
+    type: z.literal("ask"),
+    ...base,
+    team: z.number().int().min(1),
+  }),
+  z.strictObject({ type: z.literal("admit"), ...base, who: handle }),
+  z.strictObject({ type: z.literal("leave"), ...base }),
+  z.strictObject({
+    type: z.literal("submit"),
+    ...base,
+    ...submissionSchema.shape,
+  }),
+  z.strictObject({ type: z.literal("cancel"), ...base }),
+]);
+
+export type Action = z.output<typeof actionSchema>;
 
 // What the list keeps: the action, and for a new team the number it got.
 export type Event = Action & { team?: number };
@@ -117,6 +137,7 @@ export function start(settings: Settings): State {
 }
 
 export function phase(s: State, at: string): Phase {
+  if (!isUtc(at)) throw new Error("phase needs a UTC time");
   if (s.cancelled_at !== null) return "cancelled";
   const now = Date.parse(at);
   if (now < Date.parse(s.settings.starts_at)) return "registration";
@@ -135,10 +156,14 @@ function captainOf(t: Team): string | undefined {
   return t.members[0]?.handle;
 }
 
+// Names that differ only in case, width or a compatibility form are one name;
+// upper-casing first folds ß and its kin as well.
+function fold(s: string): string {
+  return s.normalize("NFKC").toUpperCase().toLowerCase();
+}
+
 function sameName(a: string, b: string): boolean {
-  return (
-    a.normalize("NFKC").toLowerCase() === b.normalize("NFKC").toLowerCase()
-  );
+  return fold(a) === fold(b);
 }
 
 // A copy deep enough that applying an action never changes the state it was
@@ -178,17 +203,16 @@ function joinTeam(s: State, t: Team, handle: string, at: string): void {
   s.asks.delete(handle);
 }
 
-function validAt(at: string): boolean {
-  return (
-    /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/.test(at) &&
-    !Number.isNaN(Date.parse(at))
-  );
-}
-
 // Applies one action. A refusal changes nothing; an accepted action returns
 // the new state with its event at the end of the list.
-export function apply(s: State, a: Action): Accepted | Refusal {
-  if (!validAt(a.at)) return refuse("invalid", "at must be a UTC time");
+export function apply(s: State, input: unknown): Accepted | Refusal {
+  const parsed = actionSchema.safeParse(input);
+  if (!parsed.success) {
+    const i = parsed.error.issues[0];
+    const where = i?.path.length ? `${i.path.join(".")}: ` : "";
+    return refuse("invalid", `${where}${i?.message ?? "not an action"}`);
+  }
+  const a = structuredClone(parsed.data);
   const last = s.events.at(-1);
   if (last && Date.parse(a.at) < Date.parse(last.at)) return refuse("clock");
   if (s.cancelled_at !== null) return refuse("cancelled");
@@ -197,7 +221,7 @@ export function apply(s: State, a: Action): Accepted | Refusal {
   const deadline = Date.parse(s.settings.deadline);
   const host = s.settings.host;
   const n = clone(s);
-  let event: Event = a;
+  let event: Event = structuredClone(a);
 
   switch (a.type) {
     case "cancel": {
@@ -222,11 +246,10 @@ export function apply(s: State, a: Action): Accepted | Refusal {
       break;
     }
     case "make_team": {
-      const name = oneLine(TEAM_NAME_MAX).safeParse(a.name);
-      if (!name.success)
-        return refuse("invalid", `name: ${name.error.issues[0]?.message}`);
       if (!s.registered.has(a.by)) return refuse("not_registered");
-      if (!signUpOpen(s, a.at)) return refuse("registration_closed");
+      // Open until the deadline, past sign-up: a bot whose team left it, or
+      // that left one, can still build alone rather than be stranded.
+      if (now >= deadline) return refuse("deadline_passed");
       if (s.member_of.has(a.by)) return refuse("in_a_team");
       if (s.teams.size >= s.settings.max_teams) return refuse("too_many_teams");
       for (const t of s.teams.values())
@@ -243,12 +266,10 @@ export function apply(s: State, a: Action): Accepted | Refusal {
       };
       n.teams.set(id, t);
       joinTeam(n, t, a.by, a.at);
-      event = { ...a, team: id };
+      event = { ...structuredClone(a), team: id };
       break;
     }
     case "ask": {
-      if (!Number.isInteger(a.team))
-        return refuse("invalid", "team: a team's number");
       if (!s.registered.has(a.by)) return refuse("not_registered");
       if (!signUpOpen(s, a.at)) return refuse("registration_closed");
       if (s.member_of.has(a.by)) return refuse("in_a_team");
@@ -280,11 +301,6 @@ export function apply(s: State, a: Action): Accepted | Refusal {
       break;
     }
     case "submit": {
-      const sub = submissionSchema.safeParse({ title: a.title, pins: a.pins });
-      if (!sub.success) {
-        const i = sub.error.issues[0];
-        return refuse("invalid", `${i?.path.join(".")}: ${i?.message}`);
-      }
       const id = s.member_of.get(a.by);
       if (id === undefined) return refuse("not_in_a_team");
       if (now < Date.parse(s.settings.starts_at)) return refuse("not_started");
@@ -295,12 +311,10 @@ export function apply(s: State, a: Action): Accepted | Refusal {
       if (!t) return refuse("not_in_a_team");
       t.entries = [
         ...t.entries,
-        { at: a.at, by: a.by, title: sub.data.title, pins: sub.data.pins },
+        { at: a.at, by: a.by, title: a.title, pins: a.pins },
       ];
       break;
     }
-    default:
-      return refuse("invalid", "no such action");
   }
 
   n.events.push(event);
@@ -313,10 +327,10 @@ export function apply(s: State, a: Action): Accepted | Refusal {
 export function replay(settings: Settings, events: readonly Event[]): State {
   let s = start(settings);
   for (const [i, e] of events.entries()) {
-    let action: Action = e as Action;
+    let action: unknown = e;
     if (e.type === "make_team") {
       const { team: _made, ...rest } = e;
-      action = rest as Action;
+      action = rest;
     }
     const r = apply(s, action);
     if (!r.ok)

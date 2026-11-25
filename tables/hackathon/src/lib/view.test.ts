@@ -121,3 +121,23 @@ describe("views", () => {
     );
   });
 });
+
+describe("view edges", () => {
+  it("shows work when cancelled exactly at the deadline", () => {
+    const r = apply(s, { type: "cancel", by: "host-bot", at: DEADLINE });
+    if (!r.ok) throw new Error(r.code);
+    expect(view(r.state, null, DEADLINE).teams[1]?.entry?.untrusted_title).toBe(
+      "cats",
+    );
+  });
+
+  it("hides asks once sign-up has closed, since none can be admitted", () => {
+    expect(view(s, "ann", BUILDING).you?.asks).toBeUndefined();
+    expect(view(s, "dan", BUILDING).you?.asked).toBeUndefined();
+  });
+
+  it("refuses to draw a view at a time that isn't one", () => {
+    expect(() => view(s, "ann", "garbage")).toThrow();
+    expect(() => view(s, null, "2026-02-31T00:00:00Z")).toThrow();
+  });
+});

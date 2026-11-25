@@ -122,11 +122,13 @@ describe("sign-up", () => {
     expect(code(s, { type: "register", by: "ann", at: BEFORE })).toBe(
       "already_registered",
     );
-    for (const h of ["b1", "b2", "b3", "b4", "b5"])
+    for (const h of ["bot-b1", "bot-b2", "bot-b3", "bot-b4", "bot-b5"])
       s = ok(s, { type: "register", by: h, at: BEFORE });
-    expect(code(s, { type: "register", by: "b6", at: BEFORE })).toBe("full");
-    s = ok(s, { type: "unregister", by: "b5", at: BEFORE });
-    s = ok(s, { type: "register", by: "b6", at: BEFORE });
+    expect(code(s, { type: "register", by: "bot-b6", at: BEFORE })).toBe(
+      "full",
+    );
+    s = ok(s, { type: "unregister", by: "bot-b5", at: BEFORE });
+    s = ok(s, { type: "register", by: "bot-b6", at: BEFORE });
     expect(s.registered.size).toBe(6);
   });
 
@@ -168,13 +170,13 @@ describe("teams", () => {
 
   it("caps the number of teams", () => {
     let s = start(SETTINGS);
-    for (const h of ["a1", "a2", "a3", "a4"])
+    for (const h of ["ann-a1", "ann-a2", "ann-a3", "ann-a4"])
       s = ok(s, { type: "register", by: h, at: BEFORE });
-    s = ok(s, { type: "make_team", by: "a1", at: BEFORE, name: "One" });
-    s = ok(s, { type: "make_team", by: "a2", at: BEFORE, name: "Two" });
-    s = ok(s, { type: "make_team", by: "a3", at: BEFORE, name: "Three" });
+    s = ok(s, { type: "make_team", by: "ann-a1", at: BEFORE, name: "One" });
+    s = ok(s, { type: "make_team", by: "ann-a2", at: BEFORE, name: "Two" });
+    s = ok(s, { type: "make_team", by: "ann-a3", at: BEFORE, name: "Three" });
     expect(
-      code(s, { type: "make_team", by: "a4", at: BEFORE, name: "Four" }),
+      code(s, { type: "make_team", by: "ann-a4", at: BEFORE, name: "Four" }),
     ).toBe("too_many_teams");
   });
 
@@ -379,5 +381,155 @@ describe("replay", () => {
     apply(s, { type: "leave", by: "ann", at: BUILDING });
     expect(JSON.stringify([...s.teams.values()])).toBe(before);
     expect(s.events).toHaveLength(3);
+  });
+});
+
+describe("untrusted input", () => {
+  it("refuses anything that isn't exactly an action", () => {
+    const s = withTeam();
+    const bad: unknown[] = [
+      null,
+      "register",
+      { type: "register", by: "cat", at: BEFORE, junk: "x" },
+      { type: "register", at: BEFORE },
+      { type: "register", by: 7, at: BEFORE },
+      { type: "register", by: "ab", at: BEFORE },
+      { type: "register", by: "Cat", at: BEFORE },
+      { type: "register", by: "cat", at: [BEFORE] },
+      { type: "register", by: "cat", at: "2026-02-31T00:00:00Z" },
+      { type: "register", by: "cat", at: "2026-12-01T24:00:00Z" },
+      { type: "register", by: "cat", at: "2026-12-01T17:00:00+00:00" },
+      { type: "teleport", by: "cat", at: BEFORE },
+      { type: "admit", by: "ann", at: BEFORE, who: "not a handle" },
+      { type: "ask", by: "bob", at: BEFORE, team: 1.5 },
+      { type: "ask", by: "bob", at: BEFORE, team: "1" },
+      {
+        type: "submit",
+        by: "ann",
+        at: BUILDING,
+        title: "x",
+        pins: [PIN],
+        team: 7,
+      },
+    ];
+    for (const input of bad) {
+      const r = apply(s, input);
+      expect(r.ok, JSON.stringify(input)).toBe(false);
+      expect((r as Refusal).code).toBe("invalid");
+    }
+  });
+
+  it("stores its own copy, so a caller changing its action changes nothing", () => {
+    const act = {
+      type: "submit" as const,
+      by: "ann",
+      at: BUILDING,
+      title: "mine",
+      pins: [{ ...PIN }],
+    };
+    const r = apply(withTeam(), act) as Accepted;
+    act.title = "CHANGED";
+    act.pins[0] = { ...PIN, ref: "CHANGED" };
+    (act.pins as { ref: string }[]).forEach((p) => {
+      p.ref = "CHANGED";
+    });
+    const last = r.state.events.at(-1);
+    expect(last).toMatchObject({ title: "mine", pins: [PIN] });
+    const again = replay(SETTINGS, JSON.parse(JSON.stringify(r.state.events)));
+    expect(again.teams).toEqual(r.state.teams);
+  });
+
+  it("refuses every kind of invisible or unstorable character in a name", () => {
+    const s = withTeam();
+    const names = [
+      "ㅤ",
+      "⠀",
+      "ﾠ",
+      "a️b",
+      "a\u{E0100}b",
+      "a͏b",
+      "a᠎b",
+      "ab",
+      "a\uD800b",
+      "a b",
+      "a‮b",
+    ];
+    for (const name of names)
+      expect(
+        code(s, { type: "make_team", by: "bob", at: BEFORE, name }),
+        JSON.stringify(name),
+      ).toBe("invalid");
+    expect(
+      apply(s, {
+        type: "make_team",
+        by: "bob",
+        at: BEFORE,
+        name: "Équipe 東京",
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("counts names that differ only in case folding or width as one", () => {
+    let s = start(SETTINGS);
+    s = ok(s, { type: "register", by: "ann", at: BEFORE });
+    s = ok(s, { type: "register", by: "bob", at: BEFORE });
+    s = ok(s, { type: "make_team", by: "ann", at: BEFORE, name: "straße" });
+    expect(
+      code(s, { type: "make_team", by: "bob", at: BEFORE, name: "STRASSE" }),
+    ).toBe("name_taken");
+    expect(
+      code(s, {
+        type: "make_team",
+        by: "bob",
+        at: BEFORE,
+        name: "ｓｔｒａｓｓｅ",
+      }),
+    ).toBe("name_taken");
+  });
+});
+
+describe("dropping off", () => {
+  it("lets a bot left alone after sign-up closes build as a team of one", () => {
+    let s = withTeam();
+    s = ok(s, { type: "ask", by: "bob", at: BEFORE, team: 1 });
+    s = ok(s, { type: "admit", by: "ann", at: BEFORE, who: "bob" });
+    s = ok(s, { type: "leave", by: "bob", at: BUILDING });
+    s = ok(s, { type: "make_team", by: "bob", at: BUILDING, name: "Solo" });
+    s = ok(s, {
+      type: "submit",
+      by: "bob",
+      at: BUILDING,
+      title: "x",
+      pins: [PIN],
+    });
+    expect(s.teams.get(2)?.entries).toHaveLength(1);
+    expect(code(s, { type: "ask", by: "bob", at: BUILDING, team: 1 })).toBe(
+      "registration_closed",
+    );
+  });
+
+  it("refuses a new team at the deadline", () => {
+    let s = withTeam();
+    s = ok(s, { type: "leave", by: "ann", at: BUILDING });
+    expect(
+      code(s, { type: "make_team", by: "ann", at: DEADLINE, name: "Late" }),
+    ).toBe("deadline_passed");
+  });
+
+  it("keeps asks to a team whose captain leaves, and drops them when it ends", () => {
+    let s = withTeam();
+    s = ok(s, { type: "register", by: "cat", at: BEFORE });
+    s = ok(s, { type: "register", by: "dan", at: BEFORE });
+    s = ok(s, { type: "ask", by: "bob", at: BEFORE, team: 1 });
+    s = ok(s, { type: "ask", by: "cat", at: BEFORE, team: 1 });
+    s = ok(s, { type: "admit", by: "ann", at: BEFORE, who: "bob" });
+    s = ok(s, { type: "unregister", by: "ann", at: BEFORE });
+    // bob leads now, and cat's ask is his to answer.
+    s = ok(s, { type: "admit", by: "bob", at: BEFORE, who: "cat" });
+    s = ok(s, { type: "leave", by: "bob", at: BEFORE });
+    s = ok(s, { type: "ask", by: "dan", at: BEFORE, team: 1 });
+    s = ok(s, { type: "leave", by: "cat", at: BEFORE });
+    expect(s.teams.has(1)).toBe(false);
+    expect(s.asks.has("dan")).toBe(false);
   });
 });

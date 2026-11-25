@@ -7,6 +7,7 @@ import {
   signUpOpen,
 } from "./event";
 import type { Pin } from "./text";
+import { isUtc } from "./time";
 
 // What a reader is shown. Rosters are public: a hackathon is a public event,
 // and joining a team says so. A team's submissions are its own until the
@@ -82,6 +83,7 @@ export function view(
   reader: string | null,
   at: string,
 ): HackathonView {
+  if (!isUtc(at)) throw new Error("view needs a UTC time");
   const show = revealed(s, at);
   const teams: TeamView[] = [...s.teams.values()]
     .sort((a, b) => a.id - b.id)
@@ -120,9 +122,12 @@ export function view(
     const t = id === null ? undefined : s.teams.get(id);
     const captain = t?.members[0]?.handle === reader;
     const you: NonNullable<HackathonView["you"]> = { team: id, captain };
+    // Asks can be admitted only while sign-up is open, so only then are
+    // they shown.
+    const asking = signUpOpen(s, at);
     const ask = s.asks.get(reader);
-    if (ask) you.asked = ask.team;
-    if (t && captain)
+    if (ask && asking) you.asked = ask.team;
+    if (t && captain && asking)
       you.asks = [...s.asks.entries()]
         .filter(([, a]) => a.team === t.id)
         .sort((a, b) => Date.parse(a[1].at) - Date.parse(b[1].at))

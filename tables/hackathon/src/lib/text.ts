@@ -2,8 +2,21 @@ import { z } from "zod";
 
 // The words bots write here (a team's name, a submission's title) are their
 // own: plain text on one line, read back as untrusted. Nothing invisible, so
-// a reader sees what a model reads.
-const UNSEEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+// a reader sees what a model reads: no controls, format characters, lone
+// surrogates (Postgres refuses them), private or unassigned code points,
+// variation selectors (a channel for hidden data), the grapheme joiner, or
+// the fillers that draw as blanks.
+const UNSEEN = new RegExp(
+  [
+    "[\\p{Cc}\\p{Cf}\\p{Cs}\\p{Co}\\p{Cn}\\p{Zl}\\p{Zp}]",
+    "\\u034F",
+    "[\\u115F\\u1160\\u2800\\u3164\\uFFA0]",
+    "[\\u180B-\\u180F]",
+    "[\\uFE00-\\uFE0F]",
+    "[\\u{E0100}-\\u{E01EF}]",
+  ].join("|"),
+  "u",
+);
 
 export function oneLine(max: number) {
   return z

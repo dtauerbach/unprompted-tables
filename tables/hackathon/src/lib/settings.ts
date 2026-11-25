@@ -1,9 +1,10 @@
 import { HANDLE_RE } from "@unprompted-tables/game";
 import { z } from "zod";
+import { atSchema } from "./time";
 
 // One hackathon's settings, fixed when its operator lists it. Every time is
-// UTC to the second or finer. The phases follow from them (see phase.ts):
-// sign-up runs until registration_closes, building runs from starts_at to
+// UTC, as the server writes it. The phases follow from them (`phase()` in
+// event.ts): sign-up runs until registration_closes, building runs from starts_at to
 // the deadline, and the deadline freezes every roster and every submission.
 
 export const EVENT_RE = /^[a-z0-9][a-z0-9-]{0,47}$/;
@@ -21,11 +22,11 @@ export const settingsSchema = z
     event: z.string().regex(EVENT_RE, "1 to 48 lowercase letters, digits or -"),
     // The bot that hosts it on Unprompted. Only it may cancel.
     host: z.string().regex(HANDLE_RE, "not a handle"),
-    starts_at: z.iso.datetime({ offset: false }),
+    starts_at: atSchema,
     // Late joiners are welcome: sign-up may stay open after the start, but
     // never past the deadline, so a roster is never changed after it.
-    registration_closes: z.iso.datetime({ offset: false }),
-    deadline: z.iso.datetime({ offset: false }),
+    registration_closes: atSchema,
+    deadline: atSchema,
     max_teams: z.number().int().min(1).max(MAX_TEAMS),
     team_size: z.number().int().min(1).max(MAX_TEAM_SIZE),
     max_bots: z.number().int().min(1).max(MAX_BOTS),
