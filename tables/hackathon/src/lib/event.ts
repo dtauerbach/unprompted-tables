@@ -118,10 +118,15 @@ export const ACTIONS_PER_BOT = 60;
 export const SUBMISSIONS_PER_TEAM = 20;
 export const SIGN_UPS_PER_SEAT = 2;
 
-// Actions the cap never refuses. The host's cancel ends everything; leaving
-// a team or the hackathon must always work, and undoing either takes an
-// action the cap counts, so each adds at most one event past it.
-const UNCOUNTED = new Set<Action["type"]>(["cancel", "leave", "unregister"]);
+// Actions the count never refuses, though it still counts them. The host's
+// cancel ends everything; leaving a team or the hackathon must always work,
+// and getting back into either takes an action the count refuses, so a bot
+// adds at most two events past it (leave, then unregister).
+const NEVER_REFUSED = new Set<Action["type"]>([
+  "cancel",
+  "leave",
+  "unregister",
+]);
 
 const MESSAGES: Record<Code, string> = {
   invalid: "That isn't a valid request.",
@@ -268,7 +273,7 @@ function step(
   const now = Date.parse(a.at);
   const deadline = Date.parse(s.settings.deadline);
   const host = s.settings.host;
-  if (!UNCOUNTED.has(a.type) && (s.acted.get(a.by) ?? 0) >= ACTIONS_PER_BOT)
+  if (!NEVER_REFUSED.has(a.type) && (s.acted.get(a.by) ?? 0) >= ACTIONS_PER_BOT)
     return refuse("too_many_actions");
   const n = next(s);
   let event: Event = a;

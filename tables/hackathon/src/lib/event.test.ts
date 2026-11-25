@@ -582,10 +582,9 @@ describe("bounds", () => {
       s = r.state;
       accepted += 1;
     }
-    // Leaving is never refused for the count, so the last one may go one
-    // past it; making a team, which the count does refuse, can't follow.
-    expect(accepted).toBeGreaterThanOrEqual(ACTIONS_PER_BOT);
-    expect(accepted).toBeLessThanOrEqual(ACTIONS_PER_BOT + 1);
+    // ann reaches the count in a team; leaving is never refused for it, so
+    // she goes one past, and making a team, which it does refuse, can't follow.
+    expect(accepted).toBe(ACTIONS_PER_BOT + 1);
     // bob is untouched by ann's count, and the host can still call it off.
     s = ok(s, { type: "unregister", by: "bob", at: BUILDING });
     s = ok(s, { type: "cancel", by: "host-bot", at: BUILDING });
@@ -624,8 +623,23 @@ describe("bounds", () => {
       "too_many_sign_ups",
     );
     // A bot that signed up before may come back.
-    s = ok(s, { type: "register", by: "bot-0", at: BEFORE });
-    expect(s.registered.has("bot-0")).toBe(true);
+    const back = apply(s, { type: "register", by: "bot-0", at: BEFORE });
+    expect(back.ok).toBe(true);
+    // Applying copies the set: the state it was handed is unchanged.
+    expect(s.registered.has("bot-0")).toBe(false);
+    expect(s.ever.size).toBe(cap);
+    const fresh = apply(start(SETTINGS), {
+      type: "register",
+      by: "new-bot",
+      at: BEFORE,
+    }) as Accepted;
+    expect(fresh.state.ever.has("new-bot")).toBe(true);
+    // And replay builds it from the list alone.
+    const again = replay(SETTINGS, s.events);
+    expect(again.ever.size).toBe(cap);
+    expect(code(again, { type: "register", by: "new-bot", at: BEFORE })).toBe(
+      "too_many_sign_ups",
+    );
   });
 
   it("leaves the state it was handed alone when it refuses", () => {
@@ -640,6 +654,9 @@ describe("bounds", () => {
     );
     expect(s.acted).toEqual(before);
     expect(s.events).toHaveLength(events);
+    const ever = new Set(s.ever);
+    apply(s, { type: "register", by: "cat", at: BEFORE });
+    expect(s.ever).toEqual(ever);
     // An accepted action counts only in the state it returns.
     const r = apply(s, { type: "leave", by: "ann", at: BEFORE }) as Accepted;
     expect(r.ok).toBe(true);
@@ -678,12 +695,14 @@ describe("bounds", () => {
       team_size: 8,
       max_bots: 512,
     });
+    // Twice max_bots bots sign up in turn, each using its count making and
+    // leaving teams, then leaving the team and the hackathon past it.
     const events: Event[] = [];
     let team = 0;
-    for (let b = 0; b < 512; b++) {
+    for (let b = 0; b < SIGN_UPS_PER_SEAT * 512; b++) {
       const by = `bot-${b}`;
       events.push({ type: "register", by, at: BEFORE });
-      for (let k = 0; k < Math.floor((ACTIONS_PER_BOT - 1) / 2); k++) {
+      for (let k = 0; k < (ACTIONS_PER_BOT - 2) / 2; k++) {
         team += 1;
         events.push({
           type: "make_team",
@@ -694,7 +713,20 @@ describe("bounds", () => {
         });
         events.push({ type: "leave", by, at: BEFORE });
       }
+      team += 1;
+      events.push({
+        type: "make_team",
+        by,
+        at: BEFORE,
+        name: `t${team}`,
+        team,
+      });
+      events.push({ type: "leave", by, at: BEFORE });
+      events.push({ type: "unregister", by, at: BEFORE });
     }
+    expect(events).toHaveLength(
+      SIGN_UPS_PER_SEAT * 512 * (ACTIONS_PER_BOT + 2),
+    );
     const started = performance.now();
     const s = replay(big, events);
     const took = performance.now() - started;
