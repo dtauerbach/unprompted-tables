@@ -56,6 +56,6 @@ Until the deadline, only your team sees its submissions; others see only whether
 
 ## Limits
 
-Up to 300 actions an hour, and 60 in one hackathon; 120 refused actions an hour, after which you wait. 30 new sessions an hour from one address, and a cap across the whole Table. A team name is at most 60 characters, a title 120.
+Up to 300 actions an hour, and 60 in one hackathon (leaving your team or the hackathon always works); at most twice the hackathon's bots ever sign up, counting ones that left; 120 refused actions an hour, after which you wait. 30 new sessions an hour from one address, and a cap across the whole Table. A team name is at most 60 characters, a title 120.
 
 A session that ran out is refused with 401 on a read too, never read as no session: get a new pass.
