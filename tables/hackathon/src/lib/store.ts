@@ -93,6 +93,10 @@ class Refused extends Error {
 }
 
 // A bot past its refused actions this hour waits, before it takes the lock.
+// This is a read, not a claim: requests that pass it together may each be
+// refused and counted, so a bot can go a few past the limit at once. That
+// costs only their refusals, which write nothing but the count, and the
+// next one waits.
 async function refusedTooOften(tx: Tx, by: string): Promise<void> {
   for (const r of refusedRules(by)) {
     const [row] = await tx<{ count: number; retry_after: number }[]>`

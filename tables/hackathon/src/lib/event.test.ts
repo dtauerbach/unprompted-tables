@@ -9,6 +9,7 @@ import {
   phase,
   type Refusal,
   replay,
+  SIGN_UPS_PER_SEAT,
   type State,
   SUBMISSIONS_PER_TEAM,
   start,
@@ -574,17 +575,93 @@ describe("bounds", () => {
           };
       const r = apply(s, a);
       if (!r.ok) {
+        expect(a.type).toBe("make_team");
         expect(r.code).toBe("too_many_actions");
         break;
       }
       s = r.state;
       accepted += 1;
     }
-    expect(accepted).toBe(ACTIONS_PER_BOT);
+    // ann reaches the count in a team; leaving is never refused for it, so
+    // she goes one past, and making a team, which it does refuse, can't follow.
+    expect(accepted).toBe(ACTIONS_PER_BOT + 1);
     // bob is untouched by ann's count, and the host can still call it off.
     s = ok(s, { type: "unregister", by: "bob", at: BUILDING });
     s = ok(s, { type: "cancel", by: "host-bot", at: BUILDING });
     expect(phase(s, BUILDING)).toBe("cancelled");
+  });
+
+  it("lets a bot at its count still leave its team and the hackathon", () => {
+    let s = withTeam();
+    s = ok(s, { type: "ask", by: "bob", at: BEFORE, team: 1 });
+    s = ok(s, { type: "admit", by: "ann", at: BEFORE, who: "bob" });
+    // bob has used its count while in ann's team.
+    s.acted.set("bob", ACTIONS_PER_BOT);
+    expect(code(s, { type: "ask", by: "bob", at: BEFORE, team: 1 })).toBe(
+      "too_many_actions",
+    );
+    s = ok(s, { type: "leave", by: "bob", at: BEFORE });
+    expect(
+      code(s, { type: "make_team", by: "bob", at: BEFORE, name: "Larks" }),
+    ).toBe("too_many_actions");
+    s = ok(s, { type: "unregister", by: "bob", at: BEFORE });
+    expect(s.registered.has("bob")).toBe(false);
+    expect(code(s, { type: "register", by: "bob", at: BEFORE })).toBe(
+      "too_many_actions",
+    );
+  });
+
+  it("takes no new bots once twice its seats have ever signed up", () => {
+    let s = start(SETTINGS);
+    const cap = SIGN_UPS_PER_SEAT * SETTINGS.max_bots;
+    for (let b = 0; b < cap; b++) {
+      s = ok(s, { type: "register", by: `bot-${b}`, at: BEFORE });
+      s = ok(s, { type: "unregister", by: `bot-${b}`, at: BEFORE });
+    }
+    expect(s.registered.size).toBe(0);
+    expect(code(s, { type: "register", by: "new-bot", at: BEFORE })).toBe(
+      "too_many_sign_ups",
+    );
+    // A bot that signed up before may come back.
+    const back = apply(s, { type: "register", by: "bot-0", at: BEFORE });
+    expect(back.ok).toBe(true);
+    // Applying copies the set: the state it was handed is unchanged.
+    expect(s.registered.has("bot-0")).toBe(false);
+    expect(s.ever.size).toBe(cap);
+    const fresh = apply(start(SETTINGS), {
+      type: "register",
+      by: "new-bot",
+      at: BEFORE,
+    }) as Accepted;
+    expect(fresh.state.ever.has("new-bot")).toBe(true);
+    // And replay builds it from the list alone.
+    const again = replay(SETTINGS, s.events);
+    expect(again.ever.size).toBe(cap);
+    expect(code(again, { type: "register", by: "new-bot", at: BEFORE })).toBe(
+      "too_many_sign_ups",
+    );
+  });
+
+  it("leaves the state it was handed alone when it refuses", () => {
+    const s = withTeam();
+    const before = new Map(s.acted);
+    const events = s.events.length;
+    expect(code(s, { type: "register", by: "ann", at: BEFORE })).toBe(
+      "already_registered",
+    );
+    expect(code(s, { type: "admit", by: "bob", at: BEFORE, who: "ann" })).toBe(
+      "not_in_a_team",
+    );
+    expect(s.acted).toEqual(before);
+    expect(s.events).toHaveLength(events);
+    const ever = new Set(s.ever);
+    apply(s, { type: "register", by: "cat", at: BEFORE });
+    expect(s.ever).toEqual(ever);
+    // An accepted action counts only in the state it returns.
+    const r = apply(s, { type: "leave", by: "ann", at: BEFORE }) as Accepted;
+    expect(r.ok).toBe(true);
+    expect(r.state.acted.get("ann")).toBe((before.get("ann") ?? 0) + 1);
+    expect(s.acted).toEqual(before);
   });
 
   it("keeps a team's submissions to a fixed number", () => {
@@ -618,12 +695,14 @@ describe("bounds", () => {
       team_size: 8,
       max_bots: 512,
     });
+    // Twice max_bots bots sign up in turn, each using its count making and
+    // leaving teams, then leaving the team and the hackathon past it.
     const events: Event[] = [];
     let team = 0;
-    for (let b = 0; b < 512; b++) {
+    for (let b = 0; b < SIGN_UPS_PER_SEAT * 512; b++) {
       const by = `bot-${b}`;
       events.push({ type: "register", by, at: BEFORE });
-      for (let k = 0; k < Math.floor((ACTIONS_PER_BOT - 1) / 2); k++) {
+      for (let k = 0; k < (ACTIONS_PER_BOT - 2) / 2; k++) {
         team += 1;
         events.push({
           type: "make_team",
@@ -634,13 +713,27 @@ describe("bounds", () => {
         });
         events.push({ type: "leave", by, at: BEFORE });
       }
+      team += 1;
+      events.push({
+        type: "make_team",
+        by,
+        at: BEFORE,
+        name: `t${team}`,
+        team,
+      });
+      events.push({ type: "leave", by, at: BEFORE });
+      events.push({ type: "unregister", by, at: BEFORE });
     }
+    expect(events).toHaveLength(
+      SIGN_UPS_PER_SEAT * 512 * (ACTIONS_PER_BOT + 2),
+    );
     const started = performance.now();
     const s = replay(big, events);
     const took = performance.now() - started;
     expect(s.events).toHaveLength(events.length);
     expect(s.teams_made).toBe(team);
     // Quadratic replay took seconds at this length; linear takes a fraction.
-    expect(took).toBeLessThan(1500);
+    // The bound is loose so a slow CI machine doesn't fail it.
+    expect(took).toBeLessThan(5000);
   });
 });

@@ -69,6 +69,8 @@ export type State = {
   teams_made: number;
   // How many actions each bot has had accepted, against ACTIONS_PER_BOT.
   acted: Map<string, number>;
+  // Every bot that ever signed up, against SIGN_UPS_PER_SEAT.
+  ever: Set<string>;
   cancelled_at: string | null;
   registered: Map<string, string>;
   teams: Map<number, Team>;
@@ -101,14 +103,30 @@ export type Code =
   | "not_captain"
   | "no_ask"
   | "too_many_actions"
+  | "too_many_sign_ups"
   | "too_many_submissions";
 
 // Bounds on how long a hackathon's list can grow, so a bot that loops
 // actions can't make it slow for everyone: each bot gets this many accepted
-// actions in one hackathon, the host's cancel aside, and a team keeps at
-// most SUBMISSIONS_PER_TEAM submissions. Both are public, in skill.md.
+// actions in one hackathon (the host's cancel aside, and leaving a team or
+// the hackathon, which always work and need a counted action to undo), a
+// team keeps at most SUBMISSIONS_PER_TEAM submissions, and at most
+// SIGN_UPS_PER_SEAT times max_bots different bots ever sign up, so bots
+// that sign up and leave in turn can't grow it without end. All are
+// public, in skill.md.
 export const ACTIONS_PER_BOT = 60;
 export const SUBMISSIONS_PER_TEAM = 20;
+export const SIGN_UPS_PER_SEAT = 2;
+
+// Actions the count never refuses, though it still counts them. The host's
+// cancel ends everything; leaving a team or the hackathon must always work,
+// and getting back into either takes an action the count refuses, so a bot
+// adds at most two events past it (leave, then unregister).
+const NEVER_REFUSED = new Set<Action["type"]>([
+  "cancel",
+  "leave",
+  "unregister",
+]);
 
 const MESSAGES: Record<Code, string> = {
   invalid: "That isn't a valid request.",
@@ -132,6 +150,8 @@ const MESSAGES: Record<Code, string> = {
   not_captain: "Only your team's captain can do that.",
   no_ask: "That bot hasn't asked to join your team.",
   too_many_actions: `You've used the ${ACTIONS_PER_BOT} actions a bot gets in one hackathon.`,
+  too_many_sign_ups:
+    "Too many bots have signed up to this hackathon and left; it takes no new ones.",
   too_many_submissions: `Your team has made the ${SUBMISSIONS_PER_TEAM} submissions a team gets; the newest is your entry.`,
 };
 
@@ -145,6 +165,7 @@ export function start(settings: Settings): State {
     events: [],
     teams_made: 0,
     acted: new Map(),
+    ever: new Set(),
     cancelled_at: null,
     registered: new Map(),
     teams: new Map(),
@@ -194,6 +215,7 @@ function clone(s: State): State {
     ...s,
     events: [...s.events],
     acted: new Map(s.acted),
+    ever: new Set(s.ever),
     registered: new Map(s.registered),
     teams,
     member_of: new Map(s.member_of),
@@ -251,7 +273,7 @@ function step(
   const now = Date.parse(a.at);
   const deadline = Date.parse(s.settings.deadline);
   const host = s.settings.host;
-  if (a.type !== "cancel" && (s.acted.get(a.by) ?? 0) >= ACTIONS_PER_BOT)
+  if (!NEVER_REFUSED.has(a.type) && (s.acted.get(a.by) ?? 0) >= ACTIONS_PER_BOT)
     return refuse("too_many_actions");
   const n = next(s);
   let event: Event = a;
@@ -267,7 +289,13 @@ function step(
       if (!signUpOpen(s, a.at)) return refuse("registration_closed");
       if (s.registered.has(a.by)) return refuse("already_registered");
       if (s.registered.size >= s.settings.max_bots) return refuse("full");
+      if (
+        !s.ever.has(a.by) &&
+        s.ever.size >= SIGN_UPS_PER_SEAT * s.settings.max_bots
+      )
+        return refuse("too_many_sign_ups");
       n.registered.set(a.by, a.at);
+      n.ever.add(a.by);
       break;
     }
     case "unregister": {
