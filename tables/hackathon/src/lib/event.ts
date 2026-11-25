@@ -65,6 +65,10 @@ export type Team = {
 export type State = {
   settings: Settings;
   events: Event[];
+  // Every team ever made, so a number is never handed out twice.
+  teams_made: number;
+  // How many actions each bot has had accepted, against ACTIONS_PER_BOT.
+  acted: Map<string, number>;
   cancelled_at: string | null;
   registered: Map<string, string>;
   teams: Map<number, Team>;
@@ -95,7 +99,16 @@ export type Code =
   | "too_many_teams"
   | "team_full"
   | "not_captain"
-  | "no_ask";
+  | "no_ask"
+  | "too_many_actions"
+  | "too_many_submissions";
+
+// Bounds on how long a hackathon's list can grow, so a bot that loops
+// actions can't make it slow for everyone: each bot gets this many accepted
+// actions in one hackathon, the host's cancel aside, and a team keeps at
+// most SUBMISSIONS_PER_TEAM submissions. Both are public, in skill.md.
+export const ACTIONS_PER_BOT = 60;
+export const SUBMISSIONS_PER_TEAM = 20;
 
 const MESSAGES: Record<Code, string> = {
   invalid: "That isn't a valid request.",
@@ -118,6 +131,8 @@ const MESSAGES: Record<Code, string> = {
   team_full: "That team is full.",
   not_captain: "Only your team's captain can do that.",
   no_ask: "That bot hasn't asked to join your team.",
+  too_many_actions: `You've used the ${ACTIONS_PER_BOT} actions a bot gets in one hackathon.`,
+  too_many_submissions: `Your team has made the ${SUBMISSIONS_PER_TEAM} submissions a team gets; the newest is your entry.`,
 };
 
 function refuse(code: Code, message?: string): Refusal {
@@ -128,6 +143,8 @@ export function start(settings: Settings): State {
   return {
     settings,
     events: [],
+    teams_made: 0,
+    acted: new Map(),
     cancelled_at: null,
     registered: new Map(),
     teams: new Map(),
@@ -176,6 +193,7 @@ function clone(s: State): State {
   return {
     ...s,
     events: [...s.events],
+    acted: new Map(s.acted),
     registered: new Map(s.registered),
     teams,
     member_of: new Map(s.member_of),
@@ -206,6 +224,18 @@ function joinTeam(s: State, t: Team, handle: string, at: string): void {
 // Applies one action. A refusal changes nothing; an accepted action returns
 // the new state with its event at the end of the list.
 export function apply(s: State, input: unknown): Accepted | Refusal {
+  return step(s, input, clone);
+}
+
+// Checks one action against s and writes it into next(s). Every refusal
+// comes before any write, so replay, which owns its state and throws on a
+// refusal, can write in place (next returning s itself) and stay linear in
+// the list's length.
+function step(
+  s: State,
+  input: unknown,
+  next: (s: State) => State,
+): Accepted | Refusal {
   const parsed = actionSchema.safeParse(input);
   if (!parsed.success) {
     const i = parsed.error.issues[0];
@@ -221,7 +251,9 @@ export function apply(s: State, input: unknown): Accepted | Refusal {
   const now = Date.parse(a.at);
   const deadline = Date.parse(s.settings.deadline);
   const host = s.settings.host;
-  const n = clone(s);
+  if (a.type !== "cancel" && (s.acted.get(a.by) ?? 0) >= ACTIONS_PER_BOT)
+    return refuse("too_many_actions");
+  const n = next(s);
   let event: Event = a;
 
   switch (a.type) {
@@ -261,7 +293,8 @@ export function apply(s: State, input: unknown): Accepted | Refusal {
         if (sameName(t.name, a.name)) return refuse("name_taken");
       // Numbers count every team ever made, so one that ended never hands
       // its number to another.
-      const id = s.events.filter((e) => e.type === "make_team").length + 1;
+      const id = s.teams_made + 1;
+      n.teams_made = id;
       const t: Team = {
         id,
         name: a.name,
@@ -314,6 +347,8 @@ export function apply(s: State, input: unknown): Accepted | Refusal {
       if (now >= deadline) return refuse("deadline_passed");
       const t = n.teams.get(id);
       if (!t) return refuse("not_in_a_team");
+      if (t.entries.length >= SUBMISSIONS_PER_TEAM)
+        return refuse("too_many_submissions");
       t.entries = [
         ...t.entries,
         { at: a.at, by: a.by, title: a.title, pins: a.pins },
@@ -323,6 +358,7 @@ export function apply(s: State, input: unknown): Accepted | Refusal {
   }
 
   n.events.push(event);
+  n.acted.set(a.by, (n.acted.get(a.by) ?? 0) + 1);
   // A copy, so a caller changing the answer can't reach the list.
   return { ok: true, event: structuredClone(event), state: n };
 }
@@ -331,19 +367,19 @@ export function apply(s: State, input: unknown): Accepted | Refusal {
 // and the rules are deterministic, so one that's refused now means the list
 // or the rules changed under it: that's an error, never skipped.
 export function replay(settings: Settings, events: readonly Event[]): State {
-  let s = start(settings);
+  const s = start(settings);
+  const own = (x: State) => x;
   for (const [i, e] of events.entries()) {
     let action: unknown = e;
     if (e.type === "make_team") {
       const { team: _made, ...rest } = e;
       action = rest;
     }
-    const r = apply(s, action);
+    const r = step(s, action, own);
     if (!r.ok)
       throw new Error(`event ${i} (${e.type}) no longer applies: ${r.code}`);
     if (e.type === "make_team" && r.event.team !== e.team)
       throw new Error(`event ${i} made team ${r.event.team}, not ${e.team}`);
-    s = r.state;
   }
   return s;
 }

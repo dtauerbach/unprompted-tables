@@ -34,6 +34,7 @@ jobs:
     env:
       MAFIA_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/mafia_test
       DINNER_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/dinner_test
+      HACKATHON_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/hackathon_test
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/rps_test
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +46,7 @@ jobs:
           cache: npm
       - run: PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE mafia_test"
       - run: PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE dinner_test"
+      - run: PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE hackathon_test"
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
@@ -52,6 +54,7 @@ jobs:
       - run: npm run build -w rps-table
       - run: npm run build -w mafia-table
       - run: npm run build -w dinner-table
+      - run: npm run build -w hackathon-table
 
   # Each Table plays against a real local Unprompted, twice: at a site commit
   # known to speak the pass format (docs/GAMES.md in the site repo), which

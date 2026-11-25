@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  ACTIONS_PER_BOT,
   type Accepted,
   type Action,
   apply,
+  type Event,
   entryInForce,
   phase,
   type Refusal,
   replay,
   type State,
+  SUBMISSIONS_PER_TEAM,
   start,
 } from "./event";
 import { type Settings, settingsSchema } from "./settings";
@@ -553,5 +556,91 @@ describe("dropping off", () => {
     s = ok(s, { type: "leave", by: "cat", at: BEFORE });
     expect(s.teams.has(1)).toBe(false);
     expect(s.asks.has("dan")).toBe(false);
+  });
+});
+
+describe("bounds", () => {
+  it("gives each bot a fixed number of actions in one hackathon, the host's cancel aside", () => {
+    let s = withTeam();
+    let accepted = 2;
+    for (;;) {
+      const a: Action = s.member_of.has("ann")
+        ? { type: "leave", by: "ann", at: BUILDING }
+        : {
+            type: "make_team",
+            by: "ann",
+            at: BUILDING,
+            name: `Owls ${accepted}`,
+          };
+      const r = apply(s, a);
+      if (!r.ok) {
+        expect(r.code).toBe("too_many_actions");
+        break;
+      }
+      s = r.state;
+      accepted += 1;
+    }
+    expect(accepted).toBe(ACTIONS_PER_BOT);
+    // bob is untouched by ann's count, and the host can still call it off.
+    s = ok(s, { type: "unregister", by: "bob", at: BUILDING });
+    s = ok(s, { type: "cancel", by: "host-bot", at: BUILDING });
+    expect(phase(s, BUILDING)).toBe("cancelled");
+  });
+
+  it("keeps a team's submissions to a fixed number", () => {
+    let s = withTeam();
+    for (let i = 0; i < SUBMISSIONS_PER_TEAM; i++)
+      s = ok(s, {
+        type: "submit",
+        by: "ann",
+        at: BUILDING,
+        title: `v${i}`,
+        pins: [PIN],
+      });
+    expect(
+      code(s, {
+        type: "submit",
+        by: "ann",
+        at: BUILDING,
+        title: "one more",
+        pins: [PIN],
+      }),
+    ).toBe("too_many_submissions");
+    expect(entryInForce(s.teams.get(1) as never)).toMatchObject({
+      title: `v${SUBMISSIONS_PER_TEAM - 1}`,
+    });
+  });
+
+  it("replays the longest list the bounds allow in time linear in its length", () => {
+    const big = settingsSchema.parse({
+      ...SETTINGS,
+      max_teams: 64,
+      team_size: 8,
+      max_bots: 512,
+    });
+    const events: Event[] = [];
+    let team = 0;
+    for (let b = 0; b < 512; b++) {
+      const by = `bot-${b}`;
+      events.push({ type: "register", by, at: BEFORE });
+      for (let k = 0; k < Math.floor((ACTIONS_PER_BOT - 1) / 2); k++) {
+        team += 1;
+        events.push({
+          type: "make_team",
+          by,
+          at: BEFORE,
+          name: `t${team}`,
+          team,
+        });
+        events.push({ type: "leave", by, at: BEFORE });
+      }
+    }
+    const started = performance.now();
+    const s = replay(big, events);
+    const took = performance.now() - started;
+    expect(s.events).toHaveLength(events.length);
+    expect(s.teams_made).toBe(team);
+    // Quadratic replay took seconds at this length; linear takes a fraction.
+    expect(took).toBeLessThan(1500);
   });
 });

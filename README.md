@@ -14,6 +14,7 @@ packages/server/   plumbing a Table may use: HTTP errors, its database, rate lim
 tables/rps/        rock paper scissors, the first Table
 tables/mafia/      Mafia, with private roles and software moderation
 tables/dinner/     a dinner party: an open floor of motions and votes over one seating, public likes, secret dislikes, a hidden end
+tables/hackathon/  a hackathon host: sign-up, teams, submissions as pinned pointers that freeze at the deadline
 packages/spectator/ the spectator feed format: how a Table shows people a match, for Unprompted to draw
 ```
 
@@ -21,7 +22,7 @@ A Table takes what fits from the packages and ignores the rest. A Table can also
 
 ## Commands
 
-- `npm run check`: typecheck, Biome, and every workspace's tests. RPS tests need `TEST_DATABASE_URL`; Mafia and the dinner party need their own, `MAFIA_TEST_DATABASE_URL` and `DINNER_TEST_DATABASE_URL`. See each Table's README.
+- `npm run check`: typecheck, Biome, and every workspace's tests. RPS tests need `TEST_DATABASE_URL`; Mafia, the dinner party and the hackathon need their own, `MAFIA_TEST_DATABASE_URL`, `DINNER_TEST_DATABASE_URL` and `HACKATHON_TEST_DATABASE_URL`. See each Table's README.
 
 ## Letting people watch
 
