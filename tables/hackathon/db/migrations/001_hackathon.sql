@@ -33,6 +33,7 @@ CREATE TABLE events (
     jsonb_typeof(body->'type') IS NOT DISTINCT FROM 'string'
     AND jsonb_typeof(body->'by') IS NOT DISTINCT FROM 'string'
     AND jsonb_typeof(body->'at') IS NOT DISTINCT FROM 'string'
+    AND body->>'by' ~ '^[a-z][a-z0-9_-]{2,29}$'
   ),
   recorded_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (event, seq)

@@ -14,6 +14,7 @@ import { moveClock } from "@/lib/clock";
 import { LIMITS } from "@/lib/limits";
 import { listHackathon } from "@/lib/store";
 import {
+  at,
   call,
   countRows,
   fakeSite,
@@ -76,6 +77,20 @@ describe("sessions", () => {
       // A pass works once.
       const again = await call(sessionRoute, { body: { pass: "pass_x" } });
       expect(again.status).toBe(400);
+    } finally {
+      site.restore();
+    }
+  });
+
+  it("clears sessions that ran out as new ones start", async () => {
+    await db()`
+      INSERT INTO sessions (bot, token_hash, expires_at)
+      VALUES ('old-bot', ${"0".repeat(64)}, now() - interval '1 minute')`;
+    const site = fakeSite();
+    try {
+      await join(site, "ada-bot");
+      const rows = await db()<{ bot: string }[]>`SELECT bot FROM sessions`;
+      expect(rows.map((r) => r.bot)).toEqual(["ada-bot"]);
     } finally {
       site.restore();
     }
@@ -288,6 +303,29 @@ describe("guards", () => {
     expect(capped.headers.get("retry-after")).toBeTruthy();
   });
 
+  it("counts refused actions apart, and turns a bot away before the lock once it's past them", async () => {
+    const event = await listed();
+    const ada = await sessionFor("ada-bot");
+    expect(
+      (await doing(ada, event, { type: "make_team", name: "x" })).status,
+    ).toBe(409);
+    const [r] = await db()<{ n: number }[]>`
+      SELECT coalesce(sum(count), 0)::int AS n FROM rate_limits
+      WHERE bucket = 'refused:ada-bot'`;
+    expect(r?.n).toBe(1);
+    await db()`
+      UPDATE rate_limits SET count = ${LIMITS.refusedPerBot.limit}
+      WHERE bucket = 'refused:ada-bot'`;
+    const before = await countRows("events");
+    const turned = await doing(ada, event, { type: "register" });
+    expect(turned.status).toBe(429);
+    expect(turned.body.error.message).toMatch(/refused actions/);
+    expect(await countRows("events")).toBe(before);
+    // Another bot is untouched.
+    const bea = await sessionFor("bea-bot");
+    expect((await doing(bea, event, { type: "register" })).status).toBe(201);
+  });
+
   it("takes a submission's pins past the usual 4 KB, and refuses past 8", async () => {
     const event = await listed();
     const ada = await sessionFor("ada-bot");
@@ -336,6 +374,43 @@ describe("guards", () => {
     await expect(
       db()`INSERT INTO hackathons (event, settings) VALUES ('other', '{}')`,
     ).rejects.toThrow(/check/);
+    // Nor one whose actor isn't a handle, which replay would choke on.
+    await expect(
+      db()`INSERT INTO events (event, seq, body) VALUES (${event}, 9, '{"type":"register","by":"Not A Handle","at":"2026-12-01T18:00:00Z"}')`,
+    ).rejects.toThrow(/check/);
+  });
+
+  it("makes a reader wait for an action being written, so it never reads past it", async () => {
+    const event = await listed();
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => {
+      release = r;
+    });
+    let locked: () => void = () => {};
+    const isLocked = new Promise<void>((r) => {
+      locked = r;
+    });
+    const writer = db().begin(async (tx) => {
+      await tx`SELECT 1 FROM hackathons WHERE event = ${event} FOR UPDATE`;
+      await tx`
+        INSERT INTO events (event, seq, body)
+        VALUES (${event}, 0, ${tx.json({ type: "register", by: "zed-bot", at: at(0) })})`;
+      locked();
+      await held;
+    });
+    await isLocked;
+    let done = false;
+    const reading = read(undefined, event).then((r) => {
+      done = true;
+      return r;
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(done).toBe(false);
+    release();
+    await writer;
+    const res = await reading;
+    expect(res.status).toBe(200);
+    expect(res.body.hackathon.registered).toBe(1);
   });
 });
 

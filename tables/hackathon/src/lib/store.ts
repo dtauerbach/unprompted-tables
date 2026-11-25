@@ -1,7 +1,7 @@
 import { ApiError, consume, db, type Tx } from "@unprompted-tables/server";
 import { tableNow } from "./clock";
 import { apply, type Code, type Event, replay, type State } from "./event";
-import { actRules } from "./limits";
+import { actRules, refusedRules } from "./limits";
 import { type Settings, settingsSchema } from "./settings";
 import { type HackathonView, view } from "./view";
 
@@ -60,17 +60,56 @@ export async function act(
   by: string,
   input: Record<string, unknown>,
 ): Promise<{ accepted: Event; hackathon: HackathonView }> {
-  return db().begin(async (tx) => {
-    await consume(tx, actRules(by));
-    const s = await load(tx, event, "update");
-    const at = await stamp(tx, s);
-    const r = apply(s, { ...input, by, at });
-    if (!r.ok) throw new ApiError(STATUS[r.code] ?? 409, r.code, r.message);
-    await tx`
-      INSERT INTO events (event, seq, body)
-      VALUES (${event}, ${s.events.length}, ${tx.json(r.event)})`;
-    return { accepted: r.event, hackathon: view(r.state, by, at) };
-  });
+  try {
+    return await db().begin(async (tx) => {
+      await refusedTooOften(tx, by);
+      await consume(tx, actRules(by));
+      const s = await load(tx, event, "update");
+      const at = await stamp(tx, s);
+      const r = apply(s, { ...input, by, at });
+      if (!r.ok) throw new Refused(r.code, r.message);
+      await tx`
+        INSERT INTO events (event, seq, body)
+        VALUES (${event}, ${s.events.length}, ${tx.json(r.event)})`;
+      return { accepted: r.event, hackathon: view(r.state, by, at) };
+    });
+  } catch (e) {
+    if (!(e instanceof Refused)) throw e;
+    // Counted after the refusal rolled back, so it writes only the count.
+    await db()
+      .begin((tx) => consume(tx, refusedRules(by)))
+      .catch(() => {});
+    throw new ApiError(STATUS[e.code] ?? 409, e.code, e.message);
+  }
+}
+
+class Refused extends Error {
+  constructor(
+    readonly code: Code,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+// A bot past its refused actions this hour waits, before it takes the lock.
+async function refusedTooOften(tx: Tx, by: string): Promise<void> {
+  for (const r of refusedRules(by)) {
+    const [row] = await tx<{ count: number; retry_after: number }[]>`
+      SELECT count,
+        greatest(1, ceil(extract(epoch FROM (window_start + make_interval(secs => ${r.windowSeconds}) - now()))))::int
+          AS retry_after
+      FROM rate_limits
+      WHERE bucket = ${r.bucket}
+        AND window_start = to_timestamp(floor(extract(epoch FROM now()) / ${r.windowSeconds}) * ${r.windowSeconds})`;
+    if (row && row.count >= r.limit)
+      throw new ApiError(
+        429,
+        "rate_limited",
+        `Rate limit reached (${r.label}). Try again in ${row.retry_after} seconds.`,
+        { "Retry-After": String(row.retry_after) },
+      );
+  }
 }
 
 // One hackathon as a reader sees it. The time is read under a shared lock,

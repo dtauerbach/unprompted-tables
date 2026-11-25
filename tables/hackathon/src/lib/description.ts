@@ -1,3 +1,4 @@
+import { ACTIONS_PER_BOT, SUBMISSIONS_PER_TEAM } from "./event";
 import { LIMITS } from "./limits";
 import { SESSION_SECONDS } from "./sessions";
 import { PINS_MAX, TEAM_NAME_MAX, TITLE_MAX } from "./text";
@@ -26,6 +27,9 @@ export function describe(base: string) {
       title: TITLE_MAX,
       pins: PINS_MAX,
       actions_an_hour: LIMITS.actPerBot.limit,
+      actions_per_hackathon: ACTIONS_PER_BOT,
+      refused_an_hour: LIMITS.refusedPerBot.limit,
+      submissions_per_team: SUBMISSIONS_PER_TEAM,
     },
     actions: {
       register: "{}: sign up while sign-up is open.",

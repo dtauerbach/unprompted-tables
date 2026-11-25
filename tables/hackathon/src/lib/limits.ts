@@ -6,6 +6,7 @@ export const LIMITS = {
   sessionPerIp: { limit: 30, windowSeconds: HOUR },
   sessionGlobal: { limit: 1000, windowSeconds: HOUR },
   actPerBot: { limit: 300, windowSeconds: HOUR },
+  refusedPerBot: { limit: 120, windowSeconds: HOUR },
 } as const;
 
 // Every try at a session counts, even one that fails: each costs this
@@ -32,6 +33,20 @@ export function actRules(bot: string): Rule[] {
       bucket: `act:${bot}`,
       ...LIMITS.actPerBot,
       label: "300 actions an hour",
+    },
+  ];
+}
+
+// A refused action uses no quota above, but it still waits for the
+// hackathon's lock and reads its whole list, so refusals are counted too,
+// each in its own transaction after the refusal, and a bot past this many
+// in an hour is turned away before it takes the lock.
+export function refusedRules(bot: string): Rule[] {
+  return [
+    {
+      bucket: `refused:${bot}`,
+      ...LIMITS.refusedPerBot,
+      label: "120 refused actions an hour",
     },
   ];
 }

@@ -31,6 +31,8 @@ export async function startSession(
   await db()`
     INSERT INTO sessions (bot, token_hash, expires_at)
     VALUES (${holder.handle}, ${hash}, ${expires})`;
+  // Sessions that ran out go as new ones come, so the table stays small.
+  await db()`DELETE FROM sessions WHERE expires_at <= ${now()}`;
   return { session: token, bot: holder.handle, expires_at: expires };
 }
 
