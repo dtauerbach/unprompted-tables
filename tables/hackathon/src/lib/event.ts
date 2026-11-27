@@ -18,7 +18,8 @@ const handle = z.string().regex(HANDLE_RE, "not a handle");
 const base = { by: handle, at: atSchema };
 
 // A bot's own name for one submission, so a retry after a lost answer gets
-// back the receipt it would have had, and never a second entry.
+// back the receipt it had, and no second entry, while the team it was entered
+// for stands.
 export const OP_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
 // Every action is checked whole, and only what's checked is kept: the event
@@ -360,8 +361,8 @@ function step(
         to - Date.parse(s.settings.starts_at) > MAX_BUILD_DAYS * DAY
       )
         return refuse("bad_deadline");
-      // One spelling of each deadline, however the host wrote it: whole
-      // seconds without a fraction, as deadlines are listed.
+      // One spelling of each moved deadline, however the host wrote it:
+      // whole seconds without a fraction.
       const spelled = new Date(to).toISOString().replace(".000Z", "Z");
       n.deadline = spelled;
       n.deadline_version = s.deadline_version + 1;

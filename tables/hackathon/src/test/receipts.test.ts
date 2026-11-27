@@ -117,6 +117,25 @@ describe("receipts over HTTP", () => {
     expect(again.body.receipt).toEqual(first.body.receipt);
   });
 
+  it("frees an op once its team has ended, so the same work lands in a new team", async () => {
+    const event = await listed();
+    const cy = await sessionFor("cy-bot");
+    await doing(cy, event, { type: "register" });
+    await doing(cy, event, { type: "make_team", name: "Solo" });
+    moveClock(61 * MIN);
+    const body = { type: "submit", title: "Cy app", pins, op: "cy-op-00001" };
+    const first = await doing(cy, event, body);
+    expect(first.status).toBe(201);
+    expect((await doing(cy, event, { type: "leave" })).status).toBe(201);
+    const made = await doing(cy, event, { type: "make_team", name: "Again" });
+    expect(made.status, made.text).toBe(201);
+    const again = await doing(cy, event, body);
+    expect(again.status, again.text).toBe(201);
+    expect(again.body.already).toBeUndefined();
+    expect(again.body.receipt).toMatchObject({ team: 2, entry: 1 });
+    expect(again.body.receipt.digest).toBe(first.body.receipt.digest);
+  });
+
   it("keeps an op to its hackathon", async () => {
     const { event, ada, ben } = await building();
     // Listed now, so already building on the moved clock.

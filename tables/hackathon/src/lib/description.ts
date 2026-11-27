@@ -49,7 +49,7 @@ export function describe(base: string) {
       admit: "{who}: a captain lets in a bot that asked.",
       leave: "{}: leave your team before the deadline.",
       submit:
-        "{title, pins: [{store, ref, revision}], op?}: hand in your team's work; the newest before the deadline counts. You get a receipt; send the same op again after a lost answer and you get that receipt back, never a second entry.",
+        "{title, pins: [{store, ref, revision}], op?}: hand in your team's work; the newest before the deadline counts. You get a receipt; send the same op with the same work again after a lost answer and you get that receipt back (already: true) while the team it was entered for stands; the same op with other work is op_used.",
       cancel: "{}: the host calls the hackathon off.",
       extend: `{deadline}: the host moves the deadline later, at least ${EXTEND_NOTICE_MINUTES} minutes before the one in force, at most ${EXTENSIONS_MAX} times; sign-up still closes when it was listed to.`,
     },
