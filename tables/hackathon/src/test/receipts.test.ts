@@ -92,6 +92,45 @@ describe("receipts over HTTP", () => {
     expect(swapped.body.error.code).toBe("op_used");
     expect(await countRows("events")).toBe(rows);
   });
+
+  it("lands one of two identical submissions sent at once, and answers the other", async () => {
+    const { event, ben } = await building();
+    const body = { type: "submit", title: "Owl app", pins, op: "owl-op-0003" };
+    const rows = await countRows("events");
+    const both = await Promise.all([
+      doing(ben, event, body),
+      doing(ben, event, body),
+    ]);
+    expect(both.map((r) => r.status).sort()).toEqual([200, 201]);
+    expect(both[0]?.body.receipt).toEqual(both[1]?.body.receipt);
+    expect(await countRows("events")).toBe(rows + 1);
+  });
+
+  it("answers a retry after the hackathon is called off", async () => {
+    const { event, host, ben } = await building();
+    const body = { type: "submit", title: "Owl app", pins, op: "owl-op-0004" };
+    const first = await doing(ben, event, body);
+    expect(first.status).toBe(201);
+    expect((await doing(host, event, { type: "cancel" })).status).toBe(201);
+    const again = await doing(ben, event, body);
+    expect(again.status, again.text).toBe(200);
+    expect(again.body.receipt).toEqual(first.body.receipt);
+  });
+
+  it("keeps an op to its hackathon", async () => {
+    const { event, ada, ben } = await building();
+    // Listed now, so already building on the moved clock.
+    const other = await listed({ event: "autumn-jam" });
+    for (const s of [ada, ben])
+      expect((await doing(s, other, { type: "register" })).status).toBe(201);
+    await doing(ben, other, { type: "make_team", name: "Larks" });
+    const body = { type: "submit", title: "Owl app", pins, op: "owl-op-0005" };
+    const one = await doing(ben, event, body);
+    const two = await doing(ben, other, body);
+    expect(one.status).toBe(201);
+    expect(two.status, two.text).toBe(201);
+    expect(two.body.receipt).toMatchObject({ event: other, team: 1, entry: 1 });
+  });
 });
 
 describe("extending over HTTP", () => {

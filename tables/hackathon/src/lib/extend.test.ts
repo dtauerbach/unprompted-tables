@@ -333,3 +333,173 @@ describe("receipts", () => {
     expect(code(again, submission({ title: "other" }))).toBe("op_used");
   });
 });
+
+describe("the moved deadline everywhere (Fable review of #37)", () => {
+  const moved = () =>
+    ok(withTeam(), {
+      type: "extend",
+      by: "host-bot",
+      at: BUILDING,
+      deadline: LATER,
+    });
+  // Between the listed deadline and the moved one.
+  const BETWEEN = "2026-12-01T22:00:00Z";
+
+  it("keeps rosters open between the listed and the moved deadline, and shuts them at the moved one", () => {
+    const s = moved();
+    ok(s, { type: "leave", by: "bob", at: BETWEEN });
+    ok(s, { type: "unregister", by: "bob", at: BETWEEN });
+    const out = ok(s, { type: "leave", by: "bob", at: BETWEEN });
+    ok(out, { type: "make_team", by: "bob", at: BETWEEN, name: "Larks" });
+    expect(code(s, { type: "leave", by: "bob", at: LATER })).toBe(
+      "deadline_passed",
+    );
+    expect(code(s, { type: "unregister", by: "bob", at: LATER })).toBe(
+      "deadline_passed",
+    );
+    expect(
+      code(out, { type: "make_team", by: "bob", at: LATER, name: "Larks" }),
+    ).toBe("deadline_passed");
+    expect(
+      code(s, {
+        type: "submit",
+        by: "bob",
+        at: LATER,
+        title: "late",
+        pins: [PIN],
+      }),
+    ).toBe("deadline_passed");
+  });
+
+  it("keeps work hidden past the listed deadline, and reveals nothing if cancelled before the moved one", () => {
+    let s = withTeam();
+    s = ok(s, { type: "register", by: "cat", at: BEFORE });
+    s = ok(s, { type: "make_team", by: "cat", at: BEFORE, name: "Larks" });
+    s = ok(s, {
+      type: "extend",
+      by: "host-bot",
+      at: BUILDING,
+      deadline: LATER,
+    });
+    s = ok(s, {
+      type: "submit",
+      by: "bob",
+      at: BUILDING,
+      title: "Owl app",
+      pins: [PIN],
+    });
+    const atListed = view(s, "cat", DEADLINE);
+    expect(atListed.teams[0]?.entry).toBeUndefined();
+    expect(JSON.stringify(atListed)).not.toContain(PIN.ref);
+    expect(view(s, "ann", DEADLINE).you?.entries).toHaveLength(1);
+    const cancelled = ok(s, { type: "cancel", by: "host-bot", at: BETWEEN });
+    expect(revealed(cancelled, "2026-12-02T09:00:00Z")).toBe(false);
+    const late = ok(s, { type: "cancel", by: "host-bot", at: LATER });
+    expect(revealed(late, LATER)).toBe(true);
+  });
+
+  it("replays an extension, a submission past the listed deadline and a cancel", () => {
+    let s = moved();
+    s = ok(s, {
+      type: "submit",
+      by: "bob",
+      at: BETWEEN,
+      title: "after the listed deadline",
+      pins: [PIN],
+    });
+    s = ok(s, { type: "cancel", by: "host-bot", at: "2026-12-01T22:30:00Z" });
+    const again = replay(SETTINGS, s.events);
+    expect(again.cancelled_at).toBe("2026-12-01T22:30:00Z");
+    expect(entryInForce(again.teams.get(1) as never)).toMatchObject({
+      title: "after the listed deadline",
+      receipt: { deadline: LATER, deadline_version: 2 },
+    });
+  });
+
+  it("keeps one spelling of a moved deadline", () => {
+    const s = ok(withTeam(), {
+      type: "extend",
+      by: "host-bot",
+      at: BUILDING,
+      deadline: "2026-12-01T23:00:00.000Z",
+    });
+    expect(s.deadline).toBe(LATER);
+    expect(s.events.at(-1)).toMatchObject({ deadline: LATER });
+    const frac = ok(withTeam(), {
+      type: "extend",
+      by: "host-bot",
+      at: BUILDING,
+      deadline: "2026-12-01T23:00:00.5Z",
+    });
+    expect(frac.deadline).toBe("2026-12-01T23:00:00.500Z");
+    expect(replay(SETTINGS, frac.events).deadline).toBe(frac.deadline);
+  });
+
+  it("says the moves are used up before anything else about a fourth", () => {
+    let s = withTeam();
+    let to = Date.parse(DEADLINE);
+    for (let i = 0; i < EXTENSIONS_MAX; i++) {
+      to += 60 * 60_000;
+      s = ok(s, {
+        type: "extend",
+        by: "host-bot",
+        at: BUILDING,
+        deadline: new Date(to).toISOString(),
+      });
+    }
+    // Late, and not later either: still the count it hears.
+    expect(
+      code(s, {
+        type: "extend",
+        by: "host-bot",
+        at: "2026-12-02T09:00:00Z",
+        deadline: DEADLINE,
+      }),
+    ).toBe("too_many_extensions");
+  });
+});
+
+describe("an op whose team ended (Fable review of #37)", () => {
+  const work = { title: "Owl app", pins: [PIN], op: "commit-abc1" };
+
+  it("frees the op, so the same work lands in the new team", () => {
+    let s = start(SETTINGS);
+    s = ok(s, { type: "register", by: "ann", at: BEFORE });
+    s = ok(s, { type: "make_team", by: "ann", at: BEFORE, name: "Solo" });
+    s = ok(s, { type: "submit", by: "ann", at: BUILDING, ...work });
+    // Her leaving ends team 1, with its work.
+    s = ok(s, { type: "leave", by: "ann", at: BUILDING });
+    expect(s.teams.has(1)).toBe(false);
+    s = ok(s, { type: "make_team", by: "ann", at: BUILDING, name: "Again" });
+    const again = { type: "submit", by: "ann", at: BUILDING, ...work } as const;
+    expect(retryOf(s, again)).toBeNull();
+    const r = apply(s, again);
+    if (!r.ok) throw new Error(r.code);
+    expect(r.receipt).toMatchObject({ team: 2, entry: 1, op: "commit-abc1" });
+    expect(view(r.state, null, BUILDING).teams[0]).toMatchObject({
+      id: 2,
+      submitted: true,
+    });
+    // And now the op stands for team 2's entry.
+    expect(retryOf(r.state, again)).toEqual(r.receipt);
+    expect(replay(SETTINGS, r.state.events).ops.get("ann commit-abc1")).toEqual(
+      r.receipt,
+    );
+  });
+
+  it("still answers a retry while teammates hold the team the bot left", () => {
+    let s = withTeam();
+    const first = apply(s, {
+      type: "submit",
+      by: "bob",
+      at: BUILDING,
+      ...work,
+    });
+    if (!first.ok) throw new Error(first.code);
+    s = ok(first.state, { type: "leave", by: "bob", at: BUILDING });
+    expect(s.teams.has(1)).toBe(true);
+    expect(
+      retryOf(s, { type: "submit", by: "bob", at: BUILDING, ...work }),
+    ).toEqual(first.receipt);
+  });
+});

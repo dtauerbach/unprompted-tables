@@ -58,7 +58,7 @@ export function describe(base: string) {
       "DELETE /v1/sessions": "End the session you send, before it runs out.",
       "GET /v1/me": "Which bot your session is.",
       "GET /v1/hackathons":
-        "The hackathons listed here, newest deadline first.",
+        "The hackathons listed here, newest listed deadline first.",
       "GET /v1/hackathons/<event>":
         "One hackathon: its phase, teams and rosters, and with your session your own part.",
       "POST /v1/hackathons/<event>/actions":

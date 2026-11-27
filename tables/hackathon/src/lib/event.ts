@@ -350,6 +350,8 @@ function step(
     }
     case "extend": {
       if (a.by !== host) return refuse("not_host");
+      if (s.deadline_version > EXTENSIONS_MAX)
+        return refuse("too_many_extensions");
       if (now > deadline - EXTEND_NOTICE_MINUTES * MINUTE)
         return refuse("too_late");
       const to = Date.parse(a.deadline);
@@ -358,10 +360,12 @@ function step(
         to - Date.parse(s.settings.starts_at) > MAX_BUILD_DAYS * DAY
       )
         return refuse("bad_deadline");
-      if (s.deadline_version > EXTENSIONS_MAX)
-        return refuse("too_many_extensions");
-      n.deadline = a.deadline;
+      // One spelling of each deadline, however the host wrote it: whole
+      // seconds without a fraction, as deadlines are listed.
+      const spelled = new Date(to).toISOString().replace(".000Z", "Z");
+      n.deadline = spelled;
       n.deadline_version = s.deadline_version + 1;
+      event = { ...a, deadline: spelled };
       break;
     }
     case "register": {
@@ -458,9 +462,10 @@ function step(
       if (t.entries.length >= SUBMISSIONS_PER_TEAM)
         return refuse("too_many_submissions");
       // A retry with the same op and the same work is answered before the
-      // rules (`retryOf`), so one that reaches here is different work.
+      // rules (`retryOf`), so one that reaches here is different work, or
+      // its first entry's team has ended, which frees the op.
       const key = a.op === undefined ? null : opKey(a.by, a.op);
-      if (key !== null && s.ops.has(key)) return refuse("op_used");
+      if (key !== null && opStands(s, s.ops.get(key))) return refuse("op_used");
       const number = t.entries.length + 1;
       const receipt: Receipt = {
         event: s.settings.event,
@@ -514,17 +519,27 @@ export function digest(sub: { title: string; pins: Pin[] }): string {
   return `sha256:${createHash("sha256").update(fixed).digest("hex")}`;
 }
 
+// Whether an op's entry still stands: its team still exists. Team numbers
+// are never reused and a team's entries only grow, so while the team stands
+// so does the entry. When the last member left, the team ended with its
+// work, and a receipt for it would tell a bot its work is in when nothing
+// of it will be judged: the op is free again.
+function opStands(s: State, r: Receipt | undefined): r is Receipt {
+  return r !== undefined && s.teams.has(r.team);
+}
+
 // A submission that repeats one already accepted, by the same bot with the
-// same op and the same work: the receipt it got then, whatever has happened
-// since (the deadline passed, the bot left its team). Anything else, null,
-// and the rules decide; the same op with other work is refused there.
+// same op and the same work, while its entry stands: the receipt it got
+// then, whatever has happened since (the deadline passed, the bot left a
+// team that others still hold). Anything else, null, and the rules decide;
+// the same op with other work is refused there.
 export function retryOf(s: State, input: unknown): Receipt | null {
   const parsed = actionSchema.safeParse(input);
   if (!parsed.success) return null;
   const a = parsed.data;
   if (a.type !== "submit" || a.op === undefined) return null;
   const r = s.ops.get(opKey(a.by, a.op));
-  if (!r || r.digest !== digest(a)) return null;
+  if (!opStands(s, r) || r.digest !== digest(a)) return null;
   return structuredClone(r);
 }
 
