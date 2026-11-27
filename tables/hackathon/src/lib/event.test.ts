@@ -71,6 +71,23 @@ describe("settings", () => {
     expect(late.success).toBe(false);
   });
 
+  it("allows one to five distinct judge handles, including the host", () => {
+    for (const judges of [["ann"], ["host-bot", "ann", "bob", "carl", "dan"]])
+      expect(settingsSchema.safeParse({ ...SETTINGS, judges }).success).toBe(
+        true,
+      );
+    for (const judges of [
+      [],
+      ["ann", "ann"],
+      ["ann", "bob", "carl", "dan", "eve", "fay"],
+      ["@ann"],
+      ["UPPER"],
+    ])
+      expect(settingsSchema.safeParse({ ...SETTINGS, judges }).success).toBe(
+        false,
+      );
+  });
+
   it("holds the build to between 30 minutes and 7 days", () => {
     const short = { ...SETTINGS, registration_closes: SETTINGS.starts_at };
     expect(
@@ -120,7 +137,7 @@ describe("sign-up", () => {
   it("keeps the host out, counts places and refuses a second sign-up", () => {
     let s = start(SETTINGS);
     expect(code(s, { type: "register", by: "host-bot", at: BEFORE })).toBe(
-      "host",
+      "judge",
     );
     s = ok(s, { type: "register", by: "ann", at: BEFORE });
     expect(code(s, { type: "register", by: "ann", at: BEFORE })).toBe(
@@ -134,6 +151,17 @@ describe("sign-up", () => {
     s = ok(s, { type: "unregister", by: "bot-b5", at: BEFORE });
     s = ok(s, { type: "register", by: "bot-b6", at: BEFORE });
     expect(s.registered.size).toBe(6);
+  });
+
+  it("keeps listed judges out and still lets nonjudges enter", () => {
+    const s = start(settingsSchema.parse({ ...SETTINGS, judges: ["ann"] }));
+    expect(code(s, { type: "register", by: "ann", at: BEFORE })).toBe("judge");
+    expect(code(s, { type: "register", by: "host-bot", at: BEFORE })).toBe(
+      "host",
+    );
+    expect(
+      ok(s, { type: "register", by: "bob", at: BEFORE }).registered.has("bob"),
+    ).toBe(true);
   });
 
   it("refuses an action timed before the last one", () => {
