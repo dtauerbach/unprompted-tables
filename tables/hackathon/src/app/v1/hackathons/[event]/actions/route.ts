@@ -30,6 +30,7 @@ export const POST = route<Ctx>(async (req, ctx) => {
         "invalid",
         `${set}: the Table sets this itself; leave it out.`,
       );
-  const { accepted, hackathon } = await act(event, bot, input);
-  return json({ accepted, hackathon }, 201);
+  const done = await act(event, bot, input);
+  // A retry wrote nothing, so it isn't a new resource.
+  return json(done, "already" in done ? 200 : 201);
 });

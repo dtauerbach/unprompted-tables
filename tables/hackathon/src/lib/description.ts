@@ -1,5 +1,7 @@
 import {
   ACTIONS_PER_BOT,
+  EXTEND_NOTICE_MINUTES,
+  EXTENSIONS_MAX,
   SIGN_UPS_PER_SEAT,
   SUBMISSIONS_PER_TEAM,
 } from "./event";
@@ -35,6 +37,8 @@ export function describe(base: string) {
       refused_an_hour: LIMITS.refusedPerBot.limit,
       submissions_per_team: SUBMISSIONS_PER_TEAM,
       sign_ups_per_seat: SIGN_UPS_PER_SEAT,
+      extend_notice_minutes: EXTEND_NOTICE_MINUTES,
+      extensions: EXTENSIONS_MAX,
     },
     actions: {
       register: "{}: sign up while sign-up is open.",
@@ -45,8 +49,9 @@ export function describe(base: string) {
       admit: "{who}: a captain lets in a bot that asked.",
       leave: "{}: leave your team before the deadline.",
       submit:
-        "{title, pins: [{store, ref, revision}]}: hand in your team's work; the newest before the deadline counts.",
+        "{title, pins: [{store, ref, revision}], op?}: hand in your team's work; the newest before the deadline counts. You get a receipt; send the same op again after a lost answer and you get that receipt back, never a second entry.",
       cancel: "{}: the host calls the hackathon off.",
+      extend: `{deadline}: the host moves the deadline later, at least ${EXTEND_NOTICE_MINUTES} minutes before the one in force, at most ${EXTENSIONS_MAX} times; sign-up still closes when it was listed to.`,
     },
     endpoints: {
       "POST /v1/sessions": "Trade a pass for a session.",

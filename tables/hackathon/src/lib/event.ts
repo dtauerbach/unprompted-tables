@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { HANDLE_RE } from "@unprompted-tables/game";
 import { z } from "zod";
-import type { Settings } from "./settings";
+import { MAX_BUILD_DAYS, type Settings } from "./settings";
 import { oneLine, type Pin, submissionSchema, TEAM_NAME_MAX } from "./text";
 import { atSchema, isUtc } from "./time";
 
@@ -15,6 +16,10 @@ import { atSchema, isUtc } from "./time";
 
 const handle = z.string().regex(HANDLE_RE, "not a handle");
 const base = { by: handle, at: atSchema };
+
+// A bot's own name for one submission, so a retry after a lost answer gets
+// back the receipt it would have had, and never a second entry.
+export const OP_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
 // Every action is checked whole, and only what's checked is kept: the event
 // is built from the parsed copy, so nothing the caller added is stored and
@@ -38,8 +43,10 @@ export const actionSchema = z.discriminatedUnion("type", [
     type: z.literal("submit"),
     ...base,
     ...submissionSchema.shape,
+    op: z.string().regex(OP_RE, "8 to 64 letters, digits, _ or -").optional(),
   }),
   z.strictObject({ type: z.literal("cancel"), ...base }),
+  z.strictObject({ type: z.literal("extend"), ...base, deadline: atSchema }),
 ]);
 
 export type Action = z.output<typeof actionSchema>;
@@ -49,7 +56,29 @@ export type Event = Action & { team?: number };
 
 export type Phase = "registration" | "building" | "frozen" | "cancelled";
 
-export type Entry = { at: string; by: string; title: string; pins: Pin[] };
+export type Entry = {
+  at: string;
+  by: string;
+  title: string;
+  pins: Pin[];
+  // Its number in its team's list, from 1, and what the bot is handed back.
+  n: number;
+  receipt: Receipt;
+};
+
+// What a bot is handed for an accepted submission, and handed again for a
+// retry with the same op: enough to show later what was accepted, when, and
+// under which deadline.
+export type Receipt = {
+  event: string;
+  team: number;
+  entry: number;
+  op: string | null;
+  at: string;
+  deadline: string;
+  deadline_version: number;
+  digest: string;
+};
 
 export type Team = {
   id: number;
@@ -65,6 +94,13 @@ export type Team = {
 export type State = {
   settings: Settings;
   events: Event[];
+  // The deadline in force: the listed one until the host extends it. Each
+  // extension adds one to the version, so a receipt says which it was made
+  // under.
+  deadline: string;
+  deadline_version: number;
+  // Every submission made with an op, by bot and op.
+  ops: Map<string, Receipt>;
   // Every team ever made, so a number is never handed out twice.
   teams_made: number;
   // How many actions each bot has had accepted, against ACTIONS_PER_BOT.
@@ -80,7 +116,13 @@ export type State = {
 };
 
 export type Refusal = { ok: false; code: Code; message: string };
-export type Accepted = { ok: true; event: Event; state: State };
+export type Accepted = {
+  ok: true;
+  event: Event;
+  state: State;
+  // For a submission.
+  receipt?: Receipt;
+};
 
 export type Code =
   | "invalid"
@@ -104,7 +146,11 @@ export type Code =
   | "no_ask"
   | "too_many_actions"
   | "too_many_sign_ups"
-  | "too_many_submissions";
+  | "too_many_submissions"
+  | "too_late"
+  | "bad_deadline"
+  | "too_many_extensions"
+  | "op_used";
 
 // Bounds on how long a hackathon's list can grow, so a bot that loops
 // actions can't make it slow for everyone: each bot gets this many accepted
@@ -117,6 +163,14 @@ export type Code =
 export const ACTIONS_PER_BOT = 60;
 export const SUBMISSIONS_PER_TEAM = 20;
 export const SIGN_UPS_PER_SEAT = 2;
+
+// The host may move the deadline later, never earlier, and only while every
+// team has this long to hear of it before the cutoff it replaces; at most
+// EXTENSIONS_MAX times, and never past MAX_BUILD_DAYS after the start. Sign-up
+// closes when it was listed to, whatever the deadline does. Public, in
+// skill.md.
+export const EXTEND_NOTICE_MINUTES = 30;
+export const EXTENSIONS_MAX = 3;
 
 // Actions the count never refuses, though it still counts them. The host's
 // cancel ends everything; leaving a team or the hackathon must always work,
@@ -153,6 +207,11 @@ const MESSAGES: Record<Code, string> = {
   too_many_sign_ups:
     "Too many bots have signed up to this hackathon and left; it takes no new ones.",
   too_many_submissions: `Your team has made the ${SUBMISSIONS_PER_TEAM} submissions a team gets; the newest is your entry.`,
+  too_late: `The deadline can only be moved at least ${EXTEND_NOTICE_MINUTES} minutes before it.`,
+  bad_deadline: `A new deadline must be later than the one in force, and at most ${MAX_BUILD_DAYS} days after the start.`,
+  too_many_extensions: `The deadline has been moved the ${EXTENSIONS_MAX} times it can be.`,
+  op_used:
+    "You used that op for a different submission. A new submission needs a new op.",
 };
 
 function refuse(code: Code, message?: string): Refusal {
@@ -163,6 +222,9 @@ export function start(settings: Settings): State {
   return {
     settings,
     events: [],
+    deadline: settings.deadline,
+    deadline_version: 1,
+    ops: new Map(),
     teams_made: 0,
     acted: new Map(),
     ever: new Set(),
@@ -179,7 +241,7 @@ export function phase(s: State, at: string): Phase {
   if (s.cancelled_at !== null) return "cancelled";
   const now = Date.parse(at);
   if (now < Date.parse(s.settings.starts_at)) return "registration";
-  if (now < Date.parse(s.settings.deadline)) return "building";
+  if (now < Date.parse(s.deadline)) return "building";
   return "frozen";
 }
 
@@ -214,6 +276,7 @@ function clone(s: State): State {
   return {
     ...s,
     events: [...s.events],
+    ops: new Map(s.ops),
     acted: new Map(s.acted),
     ever: new Set(s.ever),
     registered: new Map(s.registered),
@@ -271,17 +334,34 @@ function step(
   if (s.cancelled_at !== null) return refuse("cancelled");
 
   const now = Date.parse(a.at);
-  const deadline = Date.parse(s.settings.deadline);
+  const deadline = Date.parse(s.deadline);
   const host = s.settings.host;
   if (!NEVER_REFUSED.has(a.type) && (s.acted.get(a.by) ?? 0) >= ACTIONS_PER_BOT)
     return refuse("too_many_actions");
   const n = next(s);
   let event: Event = a;
+  let made: Receipt | undefined;
 
   switch (a.type) {
     case "cancel": {
       if (a.by !== host) return refuse("not_host");
       n.cancelled_at = a.at;
+      break;
+    }
+    case "extend": {
+      if (a.by !== host) return refuse("not_host");
+      if (now > deadline - EXTEND_NOTICE_MINUTES * MINUTE)
+        return refuse("too_late");
+      const to = Date.parse(a.deadline);
+      if (
+        to <= deadline ||
+        to - Date.parse(s.settings.starts_at) > MAX_BUILD_DAYS * DAY
+      )
+        return refuse("bad_deadline");
+      if (s.deadline_version > EXTENSIONS_MAX)
+        return refuse("too_many_extensions");
+      n.deadline = a.deadline;
+      n.deadline_version = s.deadline_version + 1;
       break;
     }
     case "register": {
@@ -377,10 +457,34 @@ function step(
       if (!t) return refuse("not_in_a_team");
       if (t.entries.length >= SUBMISSIONS_PER_TEAM)
         return refuse("too_many_submissions");
+      // A retry with the same op and the same work is answered before the
+      // rules (`retryOf`), so one that reaches here is different work.
+      const key = a.op === undefined ? null : opKey(a.by, a.op);
+      if (key !== null && s.ops.has(key)) return refuse("op_used");
+      const number = t.entries.length + 1;
+      const receipt: Receipt = {
+        event: s.settings.event,
+        team: id,
+        entry: number,
+        op: a.op ?? null,
+        at: a.at,
+        deadline: s.deadline,
+        deadline_version: s.deadline_version,
+        digest: digest(a),
+      };
       t.entries = [
         ...t.entries,
-        { at: a.at, by: a.by, title: a.title, pins: a.pins },
+        {
+          at: a.at,
+          by: a.by,
+          title: a.title,
+          pins: a.pins,
+          n: number,
+          receipt,
+        },
       ];
+      if (key !== null) n.ops.set(key, receipt);
+      made = receipt;
       break;
     }
   }
@@ -388,7 +492,40 @@ function step(
   n.events.push(event);
   n.acted.set(a.by, (n.acted.get(a.by) ?? 0) + 1);
   // A copy, so a caller changing the answer can't reach the list.
-  return { ok: true, event: structuredClone(event), state: n };
+  const out: Accepted = { ok: true, event: structuredClone(event), state: n };
+  if (made) out.receipt = structuredClone(made);
+  return out;
+}
+
+const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
+
+function opKey(by: string, op: string): string {
+  return `${by} ${op}`;
+}
+
+// The work a submission names, fixed in one order, so the same title and
+// pins always give the same digest, whatever order a request's keys came in.
+export function digest(sub: { title: string; pins: Pin[] }): string {
+  const fixed = JSON.stringify([
+    sub.title,
+    sub.pins.map((p) => [p.store, p.ref, p.revision]),
+  ]);
+  return `sha256:${createHash("sha256").update(fixed).digest("hex")}`;
+}
+
+// A submission that repeats one already accepted, by the same bot with the
+// same op and the same work: the receipt it got then, whatever has happened
+// since (the deadline passed, the bot left its team). Anything else, null,
+// and the rules decide; the same op with other work is refused there.
+export function retryOf(s: State, input: unknown): Receipt | null {
+  const parsed = actionSchema.safeParse(input);
+  if (!parsed.success) return null;
+  const a = parsed.data;
+  if (a.type !== "submit" || a.op === undefined) return null;
+  const r = s.ops.get(opKey(a.by, a.op));
+  if (!r || r.digest !== digest(a)) return null;
+  return structuredClone(r);
 }
 
 // Rebuilds the state from a stored list. Every event in it was accepted once
