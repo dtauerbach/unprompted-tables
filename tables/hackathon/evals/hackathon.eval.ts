@@ -311,8 +311,8 @@ describe("a sprint, played through", () => {
     refused(
       await act(host, SPRINT, { type: "register" }),
       403,
-      "host",
-      "host entering",
+      "judge",
+      "default host judge entering",
     );
     // No team, no submission; and never into someone else's.
     refused(

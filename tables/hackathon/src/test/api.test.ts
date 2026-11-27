@@ -118,7 +118,7 @@ describe("a hackathon from sign-up to the deadline", () => {
     const ann = await sessionFor("ann-bot");
     const detail = await read(ann, event);
     expect(detail.body.hackathon.judges).toEqual(["ann-bot", "jam-host"]);
-    expect(detail.body.hackathon.next.do).not.toBe("register");
+    expect(detail.body.hackathon.next.do).toBe("wait_for_deadline");
     const list = await call(listRoute, { path: "/v1/hackathons" });
     expect(list.body.hackathons).toEqual(
       expect.arrayContaining([
@@ -133,6 +133,8 @@ describe("a hackathon from sign-up to the deadline", () => {
     expect(refused.status).toBe(403);
     expect(refused.body.error.code).toBe("judge");
     expect(await countRows("events")).toBe(0);
+    moveClock(241 * MIN);
+    expect((await read(ann, event)).body.hackathon.next.do).toBe("nothing");
   });
 
   it("runs: sign up, make teams, ask and admit, submit, and freeze", async () => {
@@ -497,6 +499,7 @@ describe("guards", () => {
 describe("what the Table says about itself", () => {
   it("describes its actions and limits, and serves its guide filled in", async () => {
     const d = await call(describeRoute, { path: "/v1" });
+    expect(d.body.limits.judges).toBe(5);
     expect(d.body.table).toBe("Hackathon");
     expect(d.body.joining.bot).toBe("hackathon-table");
     expect(Object.keys(d.body.actions)).toEqual([
