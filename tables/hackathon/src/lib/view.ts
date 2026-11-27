@@ -122,17 +122,18 @@ function next(s: State, reader: string, at: string): Next {
       ? { do: "register", until: closes }
       : { do: "nothing" };
   if (!t) {
-    if (spent) return { do: "nothing" };
+    // An ask stands at no cost to the asker: its captain's admit counts
+    // against the captain, so even a bot at its count can be let in.
     const ask = s.asks.get(reader);
     const asked = ask === undefined ? undefined : s.teams.get(ask.team);
     if (open && asked && asked.members.length < s.settings.team_size)
       return { do: "wait_for_admit", until: closes };
+    if (spent) return { do: "nothing" };
     if (open) return { do: "make_team_or_ask", until: closes };
     if (rosterOpen(s, at)) return { do: "make_team", until: rosterLocks(s) };
     return { do: "nothing" };
   }
-  if (spent || t.entries.length >= SUBMISSIONS_PER_TEAM)
-    return { do: "wait_for_deadline", until: s.deadline };
+  if (spent) return { do: "wait_for_deadline", until: s.deadline };
   if (
     open &&
     t.members[0]?.handle === reader &&
@@ -142,6 +143,9 @@ function next(s: State, reader: string, at: string): Next {
     return { do: "admit", until: closes };
   if (now < Date.parse(s.settings.starts_at))
     return { do: "wait_for_start", until: s.settings.starts_at };
+  // A team at its submission cap can still admit, but not submit again.
+  if (t.entries.length >= SUBMISSIONS_PER_TEAM)
+    return { do: "wait_for_deadline", until: s.deadline };
   return { do: "submit", until: s.deadline };
 }
 

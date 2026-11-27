@@ -464,6 +464,42 @@ describe("the view's roster lock and next step", () => {
     ).toBe("too_many_submissions");
   });
 
+  it("tells a captain at its submission cap to admit while it can", () => {
+    // Started at listing, sign-up still open, room for one more.
+    let s = start(
+      settingsSchema.parse(
+        withRosterLock({ ...LISTED, starts_at: BEFORE, team_size: 3 }),
+      ),
+    );
+    for (const by of ["ann", "bob", "eve"])
+      s = ok(s, { type: "register", by, at: BEFORE });
+    s = ok(s, { type: "make_team", by: "ann", at: BEFORE, name: "Owls" });
+    s = ok(s, { type: "ask", by: "bob", at: BEFORE, team: 1 });
+    s = ok(s, { type: "admit", by: "ann", at: BEFORE, who: "bob" });
+    for (let i = 0; i < SUBMISSIONS_PER_TEAM; i++)
+      s = ok(s, {
+        type: "submit",
+        by: "bob",
+        at: BEFORE,
+        title: `v${i}`,
+        pins: [PIN],
+      });
+    s = ok(s, { type: "ask", by: "eve", at: BEFORE, team: 1 });
+    expect(nextOf(s, "ann", BEFORE)).toEqual({
+      do: "admit",
+      until: LISTED.registration_closes,
+    });
+    expect(nextOf(s, "bob", BEFORE)).toEqual({
+      do: "wait_for_deadline",
+      until: DEADLINE,
+    });
+    s = ok(s, { type: "admit", by: "ann", at: BEFORE, who: "eve" });
+    expect(nextOf(s, "ann", BEFORE)).toEqual({
+      do: "wait_for_deadline",
+      until: DEADLINE,
+    });
+  });
+
   it("tells a bot at its action count to wait, or nothing when it has no team", () => {
     let s = start(
       settingsSchema.parse(withRosterLock({ ...LISTED, team_size: 3 })),
@@ -476,10 +512,16 @@ describe("the view's roster lock and next step", () => {
       s = ok(s, { type: "ask", by: "eve", at: BEFORE, team: 1 });
     expect(s.acted.get("eve")).toBe(ACTIONS_PER_BOT - 1);
     s = ok(s, { type: "ask", by: "eve", at: BEFORE, team: 1 });
-    expect(nextOf(s, "eve", BEFORE)).toEqual({ do: "nothing" });
+    // Its ask still stands, and ann's admit is ann's count, not eve's.
+    expect(nextOf(s, "eve", BEFORE)).toEqual({
+      do: "wait_for_admit",
+      until: LISTED.registration_closes,
+    });
     expect(
       code(s, { type: "make_team", by: "eve", at: BEFORE, name: "E" }),
     ).toBe("too_many_actions");
+    // Once sign-up closes the ask can't be admitted, and nothing is left.
+    expect(nextOf(s, "eve", BUILDING)).toEqual({ do: "nothing" });
     // Gone and back would take a counted action it no longer has.
     const gone = ok(s, { type: "unregister", by: "eve", at: BEFORE });
     expect(nextOf(gone, "eve", BEFORE)).toEqual({ do: "nothing" });

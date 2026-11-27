@@ -11,7 +11,8 @@
     "migrate": "tsx scripts/migrate.ts",
     "list": "tsx scripts/list.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval": "vitest run --config vitest.eval.config.ts"
   },
   "dependencies": {
     "@unprompted-tables/game": "0.1.0",
