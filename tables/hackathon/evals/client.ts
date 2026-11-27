@@ -35,7 +35,9 @@ const SHAPES = [
   /pass_[A-Za-z0-9_-]{22}/g,
   /hack_[A-Za-z0-9_-]{22}/g,
 ];
-const SECRET_FIELDS = new Set(["api_key", "pass", "session", "code"]);
+// No `code`: this Table hands out none, and a refusal's error.code is the
+// transcript's most useful line.
+const SECRET_FIELDS = new Set(["api_key", "pass", "session"]);
 
 function redact(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redact);
@@ -72,9 +74,10 @@ export async function send(
   const headers: Record<string, string> = { "x-real-ip": opts.ip ?? freshIp() };
   if (opts.token) headers.authorization = `Bearer ${opts.token}`;
   if (opts.body !== undefined) headers["content-type"] = "application/json";
+  const method = opts.method ?? (opts.body === undefined ? "GET" : "POST");
   const started = Date.now();
   const res = await fetch(url, {
-    method: opts.method ?? (opts.body === undefined ? "GET" : "POST"),
+    method,
     headers,
     body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
   });
@@ -89,7 +92,7 @@ export async function send(
       redact({
         at: new Date().toISOString(),
         ms: Date.now() - started,
-        method: opts.method,
+        method,
         url,
         keyed: Boolean(opts.token),
         request: opts.body,

@@ -1,19 +1,20 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { type Res, SITE, send, TABLE } from "./client";
+import { localDatabaseEnvironment } from "./environment";
 
 // Scripted bots, no model calls, take part in a hackathon the way the guide
 // (content/skill.md) says, over HTTP against a local Unprompted, and a cheat
 // tries every way round the rules a bot could. Nothing here imports the
 // Table's code: the only way in is what any bot has.
 //
-// The sprint is listed already building, with sign-up closing a minute out,
-// rosters locking half a minute later and the deadline half a minute after
-// that, and is played through in real time. A second, long hackathon shows
+// The sprint is listed already building, with sign-up closing a minute and
+// a half out, rosters locking half a minute later and the deadline half a
+// minute after that, and is played through in real time. A second, long hackathon shows
 // the host moving its deadline and calling it off.
 //
 // Cast: the host; ada, the Owls' captain, and bob, whom she admits; cy, the
@@ -101,15 +102,22 @@ function refused(res: Res, status: number, code: string, what: string) {
 function list(settings: Record<string, unknown>): string {
   const db = process.env.EVAL_TABLE_DATABASE_URL;
   if (!db) throw new Error("EVAL_TABLE_DATABASE_URL is not set");
-  const file = path.join(tmpdir(), `${settings.event}.json`);
-  writeFileSync(file, JSON.stringify(settings));
-  const out = spawnSync("npm", ["run", "--silent", "list", "--", file], {
-    cwd: tableDir,
-    env: { ...process.env, DATABASE_URL: db, DATABASE_URL_UNPOOLED: db },
-    encoding: "utf8",
-  });
-  expect(out.status, out.stderr).toBe(0);
-  return out.stdout;
+  // Refuses any database but a local one made for tests.
+  const env = localDatabaseEnvironment(process.env, db);
+  const dir = mkdtempSync(path.join(tmpdir(), "hackathon-eval-"));
+  try {
+    const file = path.join(dir, "settings.json");
+    writeFileSync(file, JSON.stringify(settings));
+    const out = spawnSync("npm", ["run", "--silent", "list", "--", file], {
+      cwd: tableDir,
+      env,
+      encoding: "utf8",
+    });
+    expect(out.status, out.stderr).toBe(0);
+    return out.stdout;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 let host: Bot;
@@ -163,13 +171,13 @@ describe("the guide", () => {
 describe("a sprint, played through", () => {
   it("is listed by its operator, with rosters locking before the deadline", () => {
     const now = Date.now();
-    closes = spell(now + 60_000);
-    locks = spell(now + 90_000);
-    deadline = spell(now + 120_000);
+    closes = spell(now + 90_000);
+    locks = spell(now + 120_000);
+    deadline = spell(now + 150_000);
     const said = list({
       event: SPRINT,
       host: host.handle,
-      // Building from the start, so the sprint runs in two minutes.
+      // Building from the start, so the sprint runs in two and a half minutes.
       starts_at: spell(Date.parse(deadline) - 30 * 60_000),
       registration_closes: closes,
       deadline,
@@ -479,6 +487,15 @@ describe("a sprint, played through", () => {
     expect(stranger_.next).toEqual({ do: "register", until: closes });
     expect(stranger_).not.toHaveProperty("you");
     expect(await read(null, SPRINT)).not.toHaveProperty("next");
+  });
+
+  it("got through sign-up before it closed", () => {
+    // Everything above needs sign-up open. A slow machine that ran past it
+    // fails there with registration_closed; this names the cause.
+    expect(
+      Date.now(),
+      "the sprint's sign-up ran out before its steps were done",
+    ).toBeLessThan(Date.parse(closes));
   });
 
   it("closes sign-up, leaving rosters open until they lock", async () => {
