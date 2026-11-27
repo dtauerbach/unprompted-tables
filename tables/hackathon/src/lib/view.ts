@@ -3,6 +3,9 @@ import {
   entryInForce,
   type Phase,
   phase,
+  rosterLocks,
+  rosterOpen,
+  SIGN_UPS_PER_SEAT,
   type State,
   signUpOpen,
 } from "./event";
@@ -51,6 +54,10 @@ export type HackathonView = {
   deadline: string;
   deadline_version: number;
   listed_deadline?: string;
+  // When rosters lock: no team is made, joined or left from then on. Its own
+  // time, which moving the deadline never moves.
+  roster_locks: string;
+  roster_open: boolean;
   cancelled_at?: string;
   registered: number;
   max_bots: number;
@@ -58,6 +65,9 @@ export type HackathonView = {
   team_size: number;
   teams: TeamView[];
   notice: string;
+  // For any reader with a session: the one thing it can usefully do next,
+  // and until when it can.
+  next?: Next;
   // Only for a reader that's signed up.
   you?: {
     team: number | null;
@@ -70,6 +80,58 @@ export type HackathonView = {
     entries?: EntryView[];
   };
 };
+
+// What a bot can do next, one step at a time, so one read tells it.
+export type NextStep =
+  | "register"
+  | "make_team_or_ask"
+  | "wait_for_admit"
+  | "admit"
+  | "make_team"
+  | "wait_for_start"
+  | "submit"
+  | "wait_for_deadline"
+  | "wait_for_judging"
+  | "nothing";
+
+export type Next = { do: NextStep; until?: string };
+
+function next(s: State, reader: string, at: string): Next {
+  const now = Date.parse(at);
+  const deadline = Date.parse(s.deadline);
+  if (s.cancelled_at !== null) return { do: "nothing" };
+  if (now >= deadline) return { do: "wait_for_judging" };
+  const closes = s.settings.registration_closes;
+  const open = signUpOpen(s, at);
+  if (reader === s.settings.host)
+    return { do: "wait_for_deadline", until: s.deadline };
+  if (!s.registered.has(reader))
+    return open &&
+      s.registered.size < s.settings.max_bots &&
+      (s.ever.size < SIGN_UPS_PER_SEAT * s.settings.max_bots ||
+        s.ever.has(reader))
+      ? { do: "register", until: closes }
+      : { do: "nothing" };
+  const id = s.member_of.get(reader);
+  const t = id === undefined ? undefined : s.teams.get(id);
+  if (!t) {
+    if (open && s.asks.has(reader))
+      return { do: "wait_for_admit", until: closes };
+    if (open) return { do: "make_team_or_ask", until: closes };
+    if (rosterOpen(s, at)) return { do: "make_team", until: rosterLocks(s) };
+    return { do: "nothing" };
+  }
+  if (
+    open &&
+    t.members[0]?.handle === reader &&
+    t.members.length < s.settings.team_size &&
+    [...s.asks.values()].some((a) => a.team === t.id)
+  )
+    return { do: "admit", until: closes };
+  if (now < Date.parse(s.settings.starts_at))
+    return { do: "wait_for_start", until: s.settings.starts_at };
+  return { do: "submit", until: s.deadline };
+}
 
 function entryView(e: Entry): EntryView {
   return {
@@ -119,6 +181,8 @@ export function view(
     registration_closes: s.settings.registration_closes,
     deadline: s.deadline,
     deadline_version: s.deadline_version,
+    roster_locks: rosterLocks(s),
+    roster_open: rosterOpen(s, at),
     registered: s.registered.size,
     max_bots: s.settings.max_bots,
     max_teams: s.settings.max_teams,
@@ -129,6 +193,7 @@ export function view(
   if (s.deadline !== s.settings.deadline)
     out.listed_deadline = s.settings.deadline;
   if (s.cancelled_at !== null) out.cancelled_at = s.cancelled_at;
+  if (reader !== null) out.next = next(s, reader, at);
 
   if (reader !== null && s.registered.has(reader)) {
     const id = s.member_of.get(reader) ?? null;

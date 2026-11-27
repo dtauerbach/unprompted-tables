@@ -78,6 +78,8 @@ export type Receipt = {
   at: string;
   deadline: string;
   deadline_version: number;
+  // When rosters lock: its own time, which moving the deadline never moves.
+  roster_locks: string;
   digest: string;
 };
 
@@ -151,7 +153,8 @@ export type Code =
   | "too_late"
   | "bad_deadline"
   | "too_many_extensions"
-  | "op_used";
+  | "op_used"
+  | "roster_locked";
 
 // Bounds on how long a hackathon's list can grow, so a bot that loops
 // actions can't make it slow for everyone: each bot gets this many accepted
@@ -213,6 +216,8 @@ const MESSAGES: Record<Code, string> = {
   too_many_extensions: `The deadline has been moved the ${EXTENSIONS_MAX} times it can be.`,
   op_used:
     "You used that op for a different submission. A new submission needs a new op.",
+  roster_locked:
+    "Rosters are locked: no team is made, joined or left until the hackathon ends. Moving the deadline doesn't reopen them; submitting still works until the deadline.",
 };
 
 function refuse(code: Code, message?: string): Refusal {
@@ -251,6 +256,16 @@ export function signUpOpen(s: State, at: string): boolean {
     s.cancelled_at === null &&
     Date.parse(at) < Date.parse(s.settings.registration_closes)
   );
+}
+
+// When rosters lock: the listing's own time, or for a listing kept without
+// one, the deadline in force.
+export function rosterLocks(s: State): string {
+  return s.settings.roster_locks ?? s.deadline;
+}
+
+export function rosterOpen(s: State, at: string): boolean {
+  return s.cancelled_at === null && Date.parse(at) < Date.parse(rosterLocks(s));
 }
 
 function captainOf(t: Team): string | undefined {
@@ -336,6 +351,7 @@ function step(
 
   const now = Date.parse(a.at);
   const deadline = Date.parse(s.deadline);
+  const locked = now >= Date.parse(rosterLocks(s));
   const host = s.settings.host;
   if (!NEVER_REFUSED.has(a.type) && (s.acted.get(a.by) ?? 0) >= ACTIONS_PER_BOT)
     return refuse("too_many_actions");
@@ -386,6 +402,8 @@ function step(
     case "unregister": {
       if (!s.registered.has(a.by)) return refuse("not_registered");
       if (now >= deadline) return refuse("deadline_passed");
+      // A bot in no team changes no roster, so it may still go.
+      if (locked && s.member_of.has(a.by)) return refuse("roster_locked");
       leaveTeam(n, a.by);
       n.asks.delete(a.by);
       n.registered.delete(a.by);
@@ -393,10 +411,11 @@ function step(
     }
     case "make_team": {
       if (!s.registered.has(a.by)) return refuse("not_registered");
-      // Open until the deadline, past sign-up: a bot whose team left it, or
+      // Open until rosters lock, past sign-up: a bot whose team left it, or
       // that left one, can still build alone rather than be stranded.
       if (now >= deadline) return refuse("deadline_passed");
       if (s.member_of.has(a.by)) return refuse("in_a_team");
+      if (locked) return refuse("roster_locked");
       // The cap holds while sign-up is open. After it closes nobody new can
       // come in, so the cap can't be raced, and a bot that left a team then
       // could otherwise neither ask (closed) nor make one (full).
@@ -448,6 +467,7 @@ function step(
     case "leave": {
       if (!s.member_of.has(a.by)) return refuse("not_in_a_team");
       if (now >= deadline) return refuse("deadline_passed");
+      if (locked) return refuse("roster_locked");
       leaveTeam(n, a.by);
       break;
     }
@@ -476,6 +496,7 @@ function step(
         at: a.at,
         deadline: s.deadline,
         deadline_version: s.deadline_version,
+        roster_locks: rosterLocks(s),
         digest: digest(a),
       };
       t.entries = [
