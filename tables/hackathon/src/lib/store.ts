@@ -10,7 +10,7 @@ import {
   type State,
 } from "./event";
 import { actRules, refusedRules } from "./limits";
-import { type Settings, settingsSchema } from "./settings";
+import { type Settings, settingsSchema, withRosterLock } from "./settings";
 import { type HackathonView, view } from "./view";
 
 // Keeps each hackathon's list of events and the time. The rules in event.ts
@@ -161,6 +161,7 @@ export type Summary = Pick<
   | "starts_at"
   | "registration_closes"
   | "deadline"
+  | "roster_locks"
   | "registered"
   | "max_bots"
 > & { teams: number };
@@ -183,6 +184,7 @@ export async function listHackathons(): Promise<Summary[]> {
       starts_at: v.starts_at,
       registration_closes: v.registration_closes,
       deadline: v.deadline,
+      roster_locks: v.roster_locks,
       registered: v.registered,
       max_bots: v.max_bots,
       teams: v.teams.length,
@@ -194,7 +196,7 @@ export async function listHackathons(): Promise<Summary[]> {
 // The operator lists a hackathon (scripts/list.ts). Its settings are
 // checked whole and kept as checked; listing one that exists is refused.
 export async function listHackathon(input: unknown): Promise<Settings> {
-  const settings = settingsSchema.parse(input);
+  const settings = settingsSchema.parse(withRosterLock(input));
   const [row] = await db()<{ event: string }[]>`
     INSERT INTO hackathons (event, settings)
     VALUES (${settings.event}, ${db().json(settings)})

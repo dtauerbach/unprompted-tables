@@ -258,6 +258,62 @@ describe("a hackathon from sign-up to the deadline", () => {
   });
 });
 
+describe("rosters lock before the deadline", () => {
+  it("fills in the lock, says what to do next, and refuses a roster change from the lock while taking work", async () => {
+    const event = await listed();
+    const ada = await sessionFor("ada-bot");
+    const ben = await sessionFor("ben-bot");
+    const cy = await sessionFor("cy-bot");
+    for (const s of [ada, ben, cy])
+      expect((await doing(s, event, { type: "register" })).status).toBe(201);
+    expect(
+      (await doing(ada, event, { type: "make_team", name: "Owls" })).status,
+    ).toBe(201);
+    expect((await doing(ben, event, { type: "ask", team: 1 })).status).toBe(
+      201,
+    );
+    expect(
+      (await doing(ada, event, { type: "admit", who: "ben-bot" })).status,
+    ).toBe(201);
+
+    const open = (await read(ben, event)).body.hackathon;
+    // Listed without one: an hour before the deadline.
+    expect(Date.parse(open.roster_locks)).toBe(
+      Date.parse(open.deadline) - 60 * MIN,
+    );
+    expect(open.roster_locks).toMatch(/T\d\d:\d\d:\d\dZ$/);
+    expect(open.roster_open).toBe(true);
+    expect(open.next).toEqual({ do: "wait_for_start", until: open.starts_at });
+    expect((await read(undefined, event)).body.hackathon.next).toBeUndefined();
+    expect((await read(cy, event)).body.hackathon.next).toEqual({
+      do: "make_team_or_ask",
+      until: open.registration_closes,
+    });
+
+    moveClock(181 * MIN);
+    const locked = (await read(ben, event)).body.hackathon;
+    expect(locked.roster_open).toBe(false);
+    expect(locked.next).toEqual({ do: "submit", until: open.deadline });
+    const before = await countRows("events");
+    for (const [who, body] of [
+      [ben, { type: "leave" }],
+      [ben, { type: "unregister" }],
+      [cy, { type: "make_team", name: "Larks" }],
+    ] as const) {
+      const res = await doing(who, event, body);
+      expect(res.status, res.text).toBe(409);
+      expect(res.body.error.code).toBe("roster_locked");
+      expect(res.body.error.message).toMatch(/doesn't reopen them/);
+    }
+    expect(await countRows("events")).toBe(before);
+    // A bot in no team still goes; a team still hands in work.
+    expect((await doing(cy, event, { type: "unregister" })).status).toBe(201);
+    const sub = await doing(ada, event, { type: "submit", title: "v1", pins });
+    expect(sub.status, sub.text).toBe(201);
+    expect(sub.body.receipt.roster_locks).toBe(open.roster_locks);
+  });
+});
+
 describe("guards", () => {
   it("needs a session for every write, and refuses a bad one on a read", async () => {
     const event = await listed();
@@ -464,6 +520,9 @@ describe("what the Table says about itself", () => {
       "first",
     ]);
     expect(l.body.hackathons[1]).toMatchObject({ registered: 1, teams: 1 });
+    expect(l.body.hackathons[1].roster_locks).toBe(
+      (await read(undefined, "first")).body.hackathon.roster_locks,
+    );
     expect(JSON.stringify(l.body)).not.toContain("Owls");
   });
 });

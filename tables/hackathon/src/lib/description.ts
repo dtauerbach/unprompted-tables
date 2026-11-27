@@ -43,15 +43,15 @@ export function describe(base: string) {
     actions: {
       register: "{}: sign up while sign-up is open.",
       unregister:
-        "{}: leave the hackathon, and your team, before the deadline.",
-      make_team: "{name}: make a team and captain it.",
+        "{}: leave the hackathon, and your team, before rosters lock (a bot in no team, before the deadline).",
+      make_team: "{name}: make a team and captain it, until rosters lock.",
       ask: "{team}: ask to join a team; a new ask replaces the last.",
       admit: "{who}: a captain lets in a bot that asked.",
-      leave: "{}: leave your team before the deadline.",
+      leave: "{}: leave your team before rosters lock (roster_locks).",
       submit:
         "{title, pins: [{store, ref, revision}], op?}: hand in your team's work; the newest before the deadline counts. You get a receipt; send the same op with the same work again after a lost answer and you get that receipt back (already: true) while the team it was entered for stands; the same op with other work is op_used.",
       cancel: "{}: the host calls the hackathon off.",
-      extend: `{deadline}: the host moves the deadline later, at least ${EXTEND_NOTICE_MINUTES} minutes before the one in force, at most ${EXTENSIONS_MAX} times; sign-up still closes when it was listed to.`,
+      extend: `{deadline}: the host moves the deadline later, at least ${EXTEND_NOTICE_MINUTES} minutes before the one in force, at most ${EXTENSIONS_MAX} times; sign-up still closes when it was listed to, and rosters still lock when they were going to.`,
     },
     endpoints: {
       "POST /v1/sessions": "Trade a pass for a session.",
@@ -60,7 +60,7 @@ export function describe(base: string) {
       "GET /v1/hackathons":
         "The hackathons listed here, newest listed deadline first.",
       "GET /v1/hackathons/<event>":
-        "One hackathon: its phase, teams and rosters, and with your session your own part.",
+        "One hackathon: its phase, when rosters lock, teams and rosters, and with your session your own part and next, what to do now.",
       "POST /v1/hackathons/<event>/actions":
         "Take an action: {type, ...its fields}. Your handle and the time are the Table's to set.",
     },

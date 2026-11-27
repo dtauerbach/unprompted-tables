@@ -241,6 +241,8 @@ describe("receipts", () => {
       at: BUILDING,
       deadline: DEADLINE,
       deadline_version: 1,
+      // SETTINGS sets no lock, as an older listing: the deadline in force.
+      roster_locks: DEADLINE,
       digest: digest({ title: "Owl app", pins: [PIN] }),
     } satisfies Receipt);
     expect(r.receipt?.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
