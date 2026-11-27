@@ -111,6 +111,86 @@ describe("sessions", () => {
   });
 });
 
+describe("judging checks", () => {
+  it("uses the exact frozen entry, replaces a check and keeps it private", async () => {
+    const event = await listed({ judges: ["judge-bot"] });
+    const host = await sessionFor("jam-host");
+    const judge = await sessionFor("judge-bot");
+    const entrant = await sessionFor("ada-bot");
+    const other = await sessionFor("ben-bot");
+    for (const [session, name] of [
+      [entrant, "Owls"],
+      [other, "Larks"],
+    ] as const) {
+      expect((await doing(session, event, { type: "register" })).status).toBe(
+        201,
+      );
+      expect(
+        (await doing(session, event, { type: "make_team", name })).status,
+      ).toBe(201);
+    }
+    moveClock(61 * MIN);
+    const submitted = await doing(entrant, event, {
+      type: "submit",
+      title: "Entry",
+      pins,
+    });
+    expect(submitted.status).toBe(201);
+    const check = {
+      type: "check",
+      team: 1,
+      digest: submitted.body.receipt.digest,
+      result: "pass",
+      checker: "ci-v1",
+    };
+    expect((await doing(host, event, check)).body.error.code).toBe(
+      "not_frozen",
+    );
+    moveClock(241 * MIN);
+    const denied = await doing(judge, event, check);
+    expect(denied.status).toBe(403);
+    expect(denied.body.error.code).toBe("not_host");
+    expect(
+      (await doing(host, event, { ...check, team: 2 })).body.error.code,
+    ).toBe("no_entry");
+    expect(
+      (
+        await doing(host, event, {
+          ...check,
+          digest: `sha256:${"0".repeat(64)}`,
+        })
+      ).body.error.code,
+    ).toBe("digest_mismatch");
+    for (const bad of [
+      { checker: "CI" },
+      { checker: "x".repeat(100) },
+      { result: "green" },
+      { extra: true },
+    ])
+      expect((await doing(host, event, { ...check, ...bad })).status).toBe(400);
+    expect((await doing(host, event, check)).status).toBe(201);
+    expect(
+      (await doing(host, event, { ...check, result: "timeout" })).status,
+    ).toBe(201);
+    for (const session of [host, judge]) {
+      const view = (await read(session, event)).body.hackathon;
+      expect(view.checks).toEqual([
+        expect.objectContaining({
+          team: 1,
+          digest: check.digest,
+          result: "timeout",
+          checker: "ci-v1",
+        }),
+      ]);
+    }
+    for (const session of [entrant, undefined]) {
+      const view = (await read(session, event)).body.hackathon;
+      expect(view.judging).toBe("in_progress");
+      expect(view.checks).toBeUndefined();
+    }
+  });
+});
+
 describe("a hackathon from sign-up to the deadline", () => {
   it("lists effective judges and does not offer them registration", async () => {
     await listed({ event: "default-jury" });
@@ -500,6 +580,19 @@ describe("what the Table says about itself", () => {
   it("describes its actions and limits, and serves its guide filled in", async () => {
     const d = await call(describeRoute, { path: "/v1" });
     expect(d.body.limits.judges).toBe(5);
+    expect(d.body.rubric).toMatchObject({
+      version: "m29-v3",
+      criteria: {
+        works: 30,
+        problem: 25,
+        originality: 20,
+        clarity: 15,
+        craft: 10,
+      },
+      gates: ["readable", "on_time", "in_scope", "present"],
+      min: 0,
+      max: 5,
+    });
     expect(d.body.table).toBe("Hackathon");
     expect(d.body.joining.bot).toBe("hackathon-table");
     expect(Object.keys(d.body.actions)).toEqual([
@@ -510,6 +603,7 @@ describe("what the Table says about itself", () => {
       "admit",
       "leave",
       "submit",
+      "check",
       "cancel",
       "extend",
     ]);

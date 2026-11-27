@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import { HANDLE_RE } from "@unprompted-tables/game";
 import { z } from "zod";
-import { judgesFor, MAX_BUILD_DAYS, type Settings } from "./settings";
+import { CHECK_RESULTS } from "./rubric";
+import {
+  judgesFor,
+  MAX_BUILD_DAYS,
+  MAX_TEAMS,
+  type Settings,
+} from "./settings";
 import { oneLine, type Pin, submissionSchema, TEAM_NAME_MAX } from "./text";
 import { atSchema, isUtc } from "./time";
 
@@ -46,6 +52,14 @@ export const actionSchema = z.discriminatedUnion("type", [
     ...submissionSchema.shape,
     op: z.string().regex(OP_RE, "8 to 64 letters, digits, _ or -").optional(),
   }),
+  z.strictObject({
+    type: z.literal("check"),
+    ...base,
+    team: z.number().int().min(1),
+    digest: z.string().regex(/^sha256:[a-f0-9]{64}$/, "not an entry digest"),
+    result: z.enum(CHECK_RESULTS),
+    checker: z.string().regex(/^[a-z0-9_-]{1,32}$/, "not a checker id"),
+  }),
   z.strictObject({ type: z.literal("cancel"), ...base }),
   z.strictObject({ type: z.literal("extend"), ...base, deadline: atSchema }),
 ]);
@@ -54,6 +68,7 @@ export type Action = z.output<typeof actionSchema>;
 
 // What the list keeps: the action, and for a new team the number it got.
 export type Event = Action & { team?: number };
+export type Check = Omit<Extract<Action, { type: "check" }>, "type">;
 
 export type Phase = "registration" | "building" | "frozen" | "cancelled";
 
@@ -113,6 +128,8 @@ export type State = {
   cancelled_at: string | null;
   registered: Map<string, string>;
   teams: Map<number, Team>;
+  checks: Map<number, Check>;
+  checksMade: number;
   member_of: Map<string, number>;
   // One ask at a time per bot: a new one replaces the last.
   asks: Map<string, { team: number; at: string }>;
@@ -132,6 +149,9 @@ export type Code =
   | "clock"
   | "cancelled"
   | "not_host"
+  | "not_frozen"
+  | "no_entry"
+  | "digest_mismatch"
   | "host"
   | "judge"
   | "registration_closed"
@@ -166,6 +186,9 @@ export type Code =
 // that sign up and leave in turn can't grow it without end. All are
 // public, in skill.md.
 export const ACTIONS_PER_BOT = 60;
+// At maximum size the host may need to check 64 teams, independently of
+// its ordinary action count. Allow a full second pass while bounding replay.
+export const HOST_CHECKS_MAX = 2 * MAX_TEAMS;
 export const SUBMISSIONS_PER_TEAM = 20;
 export const SIGN_UPS_PER_SEAT = 2;
 
@@ -192,6 +215,9 @@ const MESSAGES: Record<Code, string> = {
   clock: "The clock ran backwards; nothing was written.",
   cancelled: "This hackathon was cancelled.",
   not_host: "Only the host can do that.",
+  not_frozen: "Judging starts when submissions freeze at the deadline.",
+  no_entry: "That team has no frozen entry.",
+  digest_mismatch: "The digest doesn't match the team's frozen entry.",
   host: "The host runs the hackathon and can't enter it.",
   judge: "Judges can't enter the hackathon.",
   registration_closed: "Sign-up has closed.",
@@ -239,6 +265,8 @@ export function start(settings: Settings): State {
     cancelled_at: null,
     registered: new Map(),
     teams: new Map(),
+    checks: new Map(),
+    checksMade: 0,
     member_of: new Map(),
     asks: new Map(),
   };
@@ -299,6 +327,7 @@ function clone(s: State): State {
     ever: new Set(s.ever),
     registered: new Map(s.registered),
     teams,
+    checks: new Map(s.checks),
     member_of: new Map(s.member_of),
     asks: new Map(s.asks),
   };
@@ -355,13 +384,34 @@ function step(
   const deadline = Date.parse(s.deadline);
   const locked = now >= Date.parse(rosterLocks(s));
   const host = s.settings.host;
-  if (!NEVER_REFUSED.has(a.type) && (s.acted.get(a.by) ?? 0) >= ACTIONS_PER_BOT)
+  if (
+    a.type !== "check" &&
+    !NEVER_REFUSED.has(a.type) &&
+    (s.acted.get(a.by) ?? 0) >= ACTIONS_PER_BOT
+  )
     return refuse("too_many_actions");
   const n = next(s);
   let event: Event = a;
   let made: Receipt | undefined;
 
   switch (a.type) {
+    case "check": {
+      if (now < deadline) return refuse("not_frozen");
+      if (a.by !== host) return refuse("not_host");
+      const team = s.teams.get(a.team);
+      const entry = team && entryInForce(team);
+      if (!entry) return refuse("no_entry");
+      if (s.checksMade >= HOST_CHECKS_MAX)
+        return refuse(
+          "too_many_actions",
+          "This hackathon has used its host checks.",
+        );
+      if (entry.receipt.digest !== a.digest) return refuse("digest_mismatch");
+      const { type: _type, ...check } = a;
+      n.checks.set(a.team, check);
+      n.checksMade += 1;
+      break;
+    }
     case "cancel": {
       if (a.by !== host) return refuse("not_host");
       n.cancelled_at = a.at;
@@ -520,7 +570,7 @@ function step(
   }
 
   n.events.push(event);
-  n.acted.set(a.by, (n.acted.get(a.by) ?? 0) + 1);
+  if (a.type !== "check") n.acted.set(a.by, (n.acted.get(a.by) ?? 0) + 1);
   // A copy, so a caller changing the answer can't reach the list.
   const out: Accepted = { ok: true, event: structuredClone(event), state: n };
   if (made) out.receipt = structuredClone(made);
