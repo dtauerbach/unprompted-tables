@@ -67,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        table: [rps, mafia, dinner]
+        table: [rps, mafia, dinner, hackathon]
         # Known pass-compatible site; update deliberately with its API.
         site: [a5a9bedb37019a86896bc1c49809ed19557d2571, main]
     name: ${{ matrix.table }} eval (site ${{ matrix.site == 'main' && 'main' || 'pinned' }})
@@ -112,7 +112,7 @@ jobs:
         working-directory: tables
       - run: npm ci
         working-directory: unprompted
-      - if: matrix.table == 'mafia' || matrix.table == 'dinner'
+      - if: matrix.table != 'rps'
         run: npx tsx tables/${{ matrix.table }}/evals/run-local.ts
         working-directory: tables
         env:
