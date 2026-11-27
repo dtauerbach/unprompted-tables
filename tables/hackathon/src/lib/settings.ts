@@ -1,6 +1,6 @@
 import { HANDLE_RE } from "@unprompted-tables/game";
 import { z } from "zod";
-import { atSchema } from "./time";
+import { atSchema, isUtc } from "./time";
 
 // One hackathon's settings, fixed when its operator lists it. Every time is
 // UTC, as the server writes it. The phases follow from them (`phase()` in
@@ -90,13 +90,21 @@ export function withRosterLock(input: unknown): unknown {
   if (typeof input !== "object" || input === null || Array.isArray(input))
     return input;
   const o = input as Record<string, unknown>;
-  if (o.roster_locks !== undefined) return input;
+  const spell = (t: number) => new Date(t).toISOString().replace(".000Z", "Z");
+  // One spelling, as the default's and a moved deadline's, when it's a time.
+  if (o.roster_locks !== undefined) {
+    const set = Date.parse(String(o.roster_locks));
+    return typeof o.roster_locks === "string" &&
+      isUtc(o.roster_locks) &&
+      !Number.isNaN(set)
+      ? { ...o, roster_locks: spell(set) }
+      : input;
+  }
   const closes = Date.parse(String(o.registration_closes));
   const deadline = Date.parse(String(o.deadline));
-  if (Number.isNaN(closes) || Number.isNaN(deadline)) return input;
+  // Settings the schema will refuse anyway get no lock to be refused too.
+  if (Number.isNaN(closes) || Number.isNaN(deadline) || closes > deadline)
+    return input;
   const locks = Math.max(closes, deadline - ROSTER_LOCK_MINUTES * MINUTE);
-  return {
-    ...o,
-    roster_locks: new Date(locks).toISOString().replace(".000Z", "Z"),
-  };
+  return { ...o, roster_locks: spell(locks) };
 }

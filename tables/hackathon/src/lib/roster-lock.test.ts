@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  ACTIONS_PER_BOT,
   type Action,
   apply,
   type Refusal,
+  retryOf,
   rosterLocks,
   rosterOpen,
   type State,
+  SUBMISSIONS_PER_TEAM,
   start,
 } from "./event";
 import {
@@ -84,11 +87,28 @@ describe("the roster lock's default", () => {
     );
   });
 
+  it("spells a lock the listing sets as whole seconds", () => {
+    const set = { ...LISTED, roster_locks: "2026-12-01T19:30:00.000Z" };
+    expect(settingsSchema.parse(withRosterLock(set)).roster_locks).toBe(
+      "2026-12-01T19:30:00Z",
+    );
+  });
+
+  it("adds no lock of its own to settings that close sign-up after the deadline", () => {
+    const bad = { ...LISTED, registration_closes: "2026-12-01T22:00:00Z" };
+    const r = settingsSchema.safeParse(withRosterLock(bad));
+    expect(r.error?.issues.map((i) => i.path.join("."))).toEqual([
+      "registration_closes",
+    ]);
+  });
+
   it("passes through what it can't read, for the schema to refuse", () => {
     expect(withRosterLock(null)).toBe(null);
     expect(withRosterLock([1])).toEqual([1]);
     const bad = { ...LISTED, deadline: "soon" };
     expect(withRosterLock(bad)).toBe(bad);
+    const odd = { ...LISTED, roster_locks: "2026-12-01 19:30" };
+    expect(withRosterLock(odd)).toBe(odd);
   });
 
   it("leaves a stored listing without one locking at the deadline in force", () => {
@@ -231,6 +251,34 @@ describe("rosters lock", () => {
     expect(s.teams.get(1)?.entries[0]?.receipt.roster_locks).toBe(LOCKS);
   });
 
+  it("answers a retry after the lock and an extension with the receipt's first lock", () => {
+    const sub: Action = {
+      type: "submit",
+      by: "ann",
+      at: BUILDING,
+      title: "x",
+      pins: [PIN],
+      op: "first-try-1",
+    };
+    let s = ok(withTeam(), sub);
+    const first = s.teams.get(1)?.entries[0]?.receipt;
+    s = ok(s, {
+      type: "extend",
+      by: "host-bot",
+      at: BUILDING,
+      deadline: LATER,
+    });
+    const again = retryOf(s, { ...sub, at: LOCKED });
+    expect(again).toEqual(first);
+    expect(again?.roster_locks).toBe(LOCKS);
+  });
+
+  it("gives a team member who makes a team after the lock in_a_team, not roster_locked", () => {
+    expect(
+      code(withTeam(), { type: "make_team", by: "bob", at: LOCKED, name: "B" }),
+    ).toBe("in_a_team");
+  });
+
   it("puts the lock on the receipt", () => {
     const s = ok(withTeam(), {
       type: "submit",
@@ -345,14 +393,144 @@ describe("the view's roster lock and next step", () => {
     expect(nextOf(s, "bob", LOCKED)).toEqual({ do: "submit", until: LATER });
   });
 
-  it("tells the host to wait for the deadline, and everyone to wait for judging after", () => {
+  it("tells the host to wait for the deadline, then team members to wait for judging", () => {
     const s = withTeam();
     expect(nextOf(s, "host-bot", BUILDING)).toEqual({
       do: "wait_for_deadline",
       until: DEADLINE,
     });
-    for (const who of ["host-bot", "ann", "eve", "zed"])
+    for (const who of ["ann", "bob"])
       expect(nextOf(s, who, DEADLINE)).toEqual({ do: "wait_for_judging" });
+    for (const who of ["host-bot", "eve", "zed"])
+      expect(nextOf(s, who, DEADLINE)).toEqual({ do: "nothing" });
+  });
+
+  it("tells a bot whose ask can no longer be admitted to make a team or ask again", () => {
+    // eve asked the Owls, who then filled up with bob.
+    let s = start(SETTINGS);
+    for (const by of ["ann", "bob", "eve"])
+      s = ok(s, { type: "register", by, at: BEFORE });
+    s = ok(s, { type: "make_team", by: "ann", at: BEFORE, name: "Owls" });
+    s = ok(s, { type: "ask", by: "eve", at: BEFORE, team: 1 });
+    s = ok(s, { type: "ask", by: "bob", at: BEFORE, team: 1 });
+    s = ok(s, { type: "admit", by: "ann", at: BEFORE, who: "bob" });
+    expect(s.asks.has("eve")).toBe(true);
+    expect(nextOf(s, "eve", BEFORE)).toEqual({
+      do: "make_team_or_ask",
+      until: LISTED.registration_closes,
+    });
+  });
+
+  it("never tells a captain to admit after sign-up closes", () => {
+    let s = start(
+      settingsSchema.parse(withRosterLock({ ...LISTED, team_size: 3 })),
+    );
+    for (const by of ["ann", "bob"])
+      s = ok(s, { type: "register", by, at: BEFORE });
+    s = ok(s, { type: "make_team", by: "ann", at: BEFORE, name: "Owls" });
+    s = ok(s, { type: "ask", by: "bob", at: BEFORE, team: 1 });
+    expect(nextOf(s, "ann", BEFORE)).toMatchObject({ do: "admit" });
+    expect(nextOf(s, "ann", BUILDING)).toEqual({
+      do: "submit",
+      until: DEADLINE,
+    });
+    expect(
+      code(s, { type: "admit", by: "ann", at: BUILDING, who: "bob" }),
+    ).toBe("registration_closed");
+  });
+
+  it("tells a team at its submission cap to wait for the deadline", () => {
+    let s = withTeam();
+    for (let i = 0; i < SUBMISSIONS_PER_TEAM; i++)
+      s = ok(s, {
+        type: "submit",
+        by: i % 2 ? "ann" : "bob",
+        at: BUILDING,
+        title: `v${i}`,
+        pins: [PIN],
+      });
+    expect(nextOf(s, "ann", BUILDING)).toEqual({
+      do: "wait_for_deadline",
+      until: DEADLINE,
+    });
+    expect(
+      code(s, {
+        type: "submit",
+        by: "ann",
+        at: BUILDING,
+        title: "x",
+        pins: [PIN],
+      }),
+    ).toBe("too_many_submissions");
+  });
+
+  it("tells a bot at its action count to wait, or nothing when it has no team", () => {
+    let s = start(
+      settingsSchema.parse(withRosterLock({ ...LISTED, team_size: 3 })),
+    );
+    for (const by of ["ann", "eve"])
+      s = ok(s, { type: "register", by, at: BEFORE });
+    s = ok(s, { type: "make_team", by: "ann", at: BEFORE, name: "Owls" });
+    // eve spends its count asking, round and round.
+    for (let i = 2; i < ACTIONS_PER_BOT; i++)
+      s = ok(s, { type: "ask", by: "eve", at: BEFORE, team: 1 });
+    expect(s.acted.get("eve")).toBe(ACTIONS_PER_BOT - 1);
+    s = ok(s, { type: "ask", by: "eve", at: BEFORE, team: 1 });
+    expect(nextOf(s, "eve", BEFORE)).toEqual({ do: "nothing" });
+    expect(
+      code(s, { type: "make_team", by: "eve", at: BEFORE, name: "E" }),
+    ).toBe("too_many_actions");
+    // Gone and back would take a counted action it no longer has.
+    const gone = ok(s, { type: "unregister", by: "eve", at: BEFORE });
+    expect(nextOf(gone, "eve", BEFORE)).toEqual({ do: "nothing" });
+    expect(code(gone, { type: "register", by: "eve", at: BEFORE })).toBe(
+      "too_many_actions",
+    );
+    // ann admits eve; in a team at its count, eve waits for the deadline.
+    s = ok(s, { type: "admit", by: "ann", at: BEFORE, who: "eve" });
+    expect(nextOf(s, "eve", STARTED)).toEqual({
+      do: "wait_for_deadline",
+      until: DEADLINE,
+    });
+  });
+
+  it("tells a bot outside the sign-up cap nothing, and one inside it to register again", () => {
+    let s = start(
+      settingsSchema.parse(withRosterLock({ ...LISTED, max_bots: 1 })),
+    );
+    // Two different bots ever: the cap for one seat.
+    s = ok(s, { type: "register", by: "ann", at: BEFORE });
+    s = ok(s, { type: "unregister", by: "ann", at: BEFORE });
+    s = ok(s, { type: "register", by: "bob", at: BEFORE });
+    s = ok(s, { type: "unregister", by: "bob", at: BEFORE });
+    expect(nextOf(s, "zed", BEFORE)).toEqual({ do: "nothing" });
+    expect(code(s, { type: "register", by: "zed", at: BEFORE })).toBe(
+      "too_many_sign_ups",
+    );
+    expect(nextOf(s, "ann", BEFORE)).toEqual({
+      do: "register",
+      until: LISTED.registration_closes,
+    });
+  });
+
+  it("tells a teamless bot nothing once rosters lock, though it may still unregister", () => {
+    const s = withTeam();
+    expect(nextOf(s, "eve", LOCKED)).toEqual({ do: "nothing" });
+  });
+
+  it("on an older listing, tells a teamless bot to make a team until the deadline in force", () => {
+    let s = withTeam(settingsSchema.parse(LISTED));
+    expect(nextOf(s, "eve", BUILDING)).toEqual({
+      do: "make_team",
+      until: DEADLINE,
+    });
+    s = ok(s, {
+      type: "extend",
+      by: "host-bot",
+      at: BUILDING,
+      deadline: LATER,
+    });
+    expect(nextOf(s, "eve", LOCKED)).toEqual({ do: "make_team", until: LATER });
   });
 
   it("tells everyone nothing once cancelled", () => {

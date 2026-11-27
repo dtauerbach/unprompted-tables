@@ -1,4 +1,5 @@
 import {
+  ACTIONS_PER_BOT,
   type Entry,
   entryInForce,
   type Phase,
@@ -7,6 +8,7 @@ import {
   rosterOpen,
   SIGN_UPS_PER_SEAT,
   type State,
+  SUBMISSIONS_PER_TEAM,
   signUpOpen,
 } from "./event";
 import type { Pin } from "./text";
@@ -96,31 +98,41 @@ export type NextStep =
 
 export type Next = { do: NextStep; until?: string };
 
+// The one thing the reader can usefully do now, by the same rules step()
+// applies, so it never names a step that would be refused at that moment.
 function next(s: State, reader: string, at: string): Next {
   const now = Date.parse(at);
-  const deadline = Date.parse(s.deadline);
   if (s.cancelled_at !== null) return { do: "nothing" };
-  if (now >= deadline) return { do: "wait_for_judging" };
-  const closes = s.settings.registration_closes;
-  const open = signUpOpen(s, at);
+  const id = s.member_of.get(reader);
+  const t = id === undefined ? undefined : s.teams.get(id);
+  if (now >= Date.parse(s.deadline))
+    return t ? { do: "wait_for_judging" } : { do: "nothing" };
   if (reader === s.settings.host)
     return { do: "wait_for_deadline", until: s.deadline };
+  const closes = s.settings.registration_closes;
+  const open = signUpOpen(s, at);
+  // A bot at its count can take no more counted actions here.
+  const spent = (s.acted.get(reader) ?? 0) >= ACTIONS_PER_BOT;
   if (!s.registered.has(reader))
-    return open &&
+    return !spent &&
+      open &&
       s.registered.size < s.settings.max_bots &&
       (s.ever.size < SIGN_UPS_PER_SEAT * s.settings.max_bots ||
         s.ever.has(reader))
       ? { do: "register", until: closes }
       : { do: "nothing" };
-  const id = s.member_of.get(reader);
-  const t = id === undefined ? undefined : s.teams.get(id);
   if (!t) {
-    if (open && s.asks.has(reader))
+    if (spent) return { do: "nothing" };
+    const ask = s.asks.get(reader);
+    const asked = ask === undefined ? undefined : s.teams.get(ask.team);
+    if (open && asked && asked.members.length < s.settings.team_size)
       return { do: "wait_for_admit", until: closes };
     if (open) return { do: "make_team_or_ask", until: closes };
     if (rosterOpen(s, at)) return { do: "make_team", until: rosterLocks(s) };
     return { do: "nothing" };
   }
+  if (spent || t.entries.length >= SUBMISSIONS_PER_TEAM)
+    return { do: "wait_for_deadline", until: s.deadline };
   if (
     open &&
     t.members[0]?.handle === reader &&

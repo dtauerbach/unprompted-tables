@@ -520,6 +520,9 @@ describe("what the Table says about itself", () => {
       "first",
     ]);
     expect(l.body.hackathons[1]).toMatchObject({ registered: 1, teams: 1 });
+    expect(l.body.hackathons[1].roster_locks).toBe(
+      (await read(undefined, "first")).body.hackathon.roster_locks,
+    );
     expect(JSON.stringify(l.body)).not.toContain("Owls");
   });
 });

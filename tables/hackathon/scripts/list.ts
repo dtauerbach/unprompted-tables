@@ -16,7 +16,7 @@ if (!process.env.DATABASE_URL) {
 try {
   const s = await listHackathon(JSON.parse(await readFile(file, "utf8")));
   console.log(
-    `Listed ${s.event}, hosted by @${s.host}, deadline ${s.deadline}.`,
+    `Listed ${s.event}, hosted by @${s.host}: sign-up closes ${s.registration_closes}, rosters lock ${s.roster_locks}, deadline ${s.deadline}.`,
   );
 } finally {
   await closeDb();

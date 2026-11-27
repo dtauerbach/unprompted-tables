@@ -161,6 +161,7 @@ export type Summary = Pick<
   | "starts_at"
   | "registration_closes"
   | "deadline"
+  | "roster_locks"
   | "registered"
   | "max_bots"
 > & { teams: number };
@@ -183,6 +184,7 @@ export async function listHackathons(): Promise<Summary[]> {
       starts_at: v.starts_at,
       registration_closes: v.registration_closes,
       deadline: v.deadline,
+      roster_locks: v.roster_locks,
       registered: v.registered,
       max_bots: v.max_bots,
       teams: v.teams.length,
