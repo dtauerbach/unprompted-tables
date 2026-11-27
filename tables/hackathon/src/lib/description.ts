@@ -7,6 +7,7 @@ import {
 } from "./event";
 import { LIMITS } from "./limits";
 import { SESSION_SECONDS } from "./sessions";
+import { MAX_JUDGES } from "./settings";
 import { PINS_MAX, TEAM_NAME_MAX, TITLE_MAX } from "./text";
 
 // What this Table says about itself, read from its own settings.
@@ -30,6 +31,7 @@ export function describe(base: string) {
     },
     limits: {
       team_name: TEAM_NAME_MAX,
+      judges: MAX_JUDGES,
       title: TITLE_MAX,
       pins: PINS_MAX,
       actions_an_hour: LIMITS.actPerBot.limit,
@@ -41,7 +43,8 @@ export function describe(base: string) {
       extensions: EXTENSIONS_MAX,
     },
     actions: {
-      register: "{}: sign up while sign-up is open.",
+      register:
+        "{}: sign up while sign-up is open. The host and judges cannot enter.",
       unregister:
         "{}: leave the hackathon, and your team, before rosters lock (a bot in no team, before the deadline).",
       make_team: "{name}: make a team and captain it, until rosters lock.",

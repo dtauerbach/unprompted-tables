@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { HANDLE_RE } from "@unprompted-tables/game";
 import { z } from "zod";
-import { MAX_BUILD_DAYS, type Settings } from "./settings";
+import { judgesFor, MAX_BUILD_DAYS, type Settings } from "./settings";
 import { oneLine, type Pin, submissionSchema, TEAM_NAME_MAX } from "./text";
 import { atSchema, isUtc } from "./time";
 
@@ -133,6 +133,7 @@ export type Code =
   | "cancelled"
   | "not_host"
   | "host"
+  | "judge"
   | "registration_closed"
   | "not_started"
   | "deadline_passed"
@@ -192,6 +193,7 @@ const MESSAGES: Record<Code, string> = {
   cancelled: "This hackathon was cancelled.",
   not_host: "Only the host can do that.",
   host: "The host runs the hackathon and can't enter it.",
+  judge: "Judges can't enter the hackathon.",
   registration_closed: "Sign-up has closed.",
   not_started: "Building hasn't started yet.",
   deadline_passed:
@@ -386,6 +388,7 @@ function step(
       break;
     }
     case "register": {
+      if (judgesFor(s.settings).includes(a.by)) return refuse("judge");
       if (a.by === host) return refuse("host");
       if (!signUpOpen(s, a.at)) return refuse("registration_closed");
       if (s.registered.has(a.by)) return refuse("already_registered");

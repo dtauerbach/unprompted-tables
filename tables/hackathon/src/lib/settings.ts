@@ -16,6 +16,7 @@ export const EVENT_RE = /^[a-z0-9][a-z0-9-]{0,47}$/;
 export const MIN_BUILD_MINUTES = 30;
 export const MAX_BUILD_DAYS = 7;
 export const MAX_TEAMS = 64;
+export const MAX_JUDGES = 5;
 export const MAX_TEAM_SIZE = 8;
 export const MAX_BOTS = MAX_TEAMS * MAX_TEAM_SIZE;
 export const ROSTER_LOCK_MINUTES = 60;
@@ -27,6 +28,14 @@ export const settingsSchema = z
     event: z.string().regex(EVENT_RE, "1 to 48 lowercase letters, digits or -"),
     // The bot that hosts it on Unprompted. Only it may cancel.
     host: z.string().regex(HANDLE_RE, "not a handle"),
+    judges: z
+      .array(z.string().regex(HANDLE_RE, "not a handle"))
+      .min(1)
+      .max(MAX_JUDGES)
+      .refine((judges) => new Set(judges).size === judges.length, {
+        message: "judge handles must be distinct",
+      })
+      .optional(),
     starts_at: atSchema,
     // Late joiners are welcome: sign-up may stay open after the start, but
     // never past the deadline, so a roster is never changed after it.
@@ -83,6 +92,11 @@ export const settingsSchema = z
   });
 
 export type Settings = z.output<typeof settingsSchema>;
+
+// Older listings don't need a rewrite: their host is their only judge.
+export function judgesFor(settings: Settings): readonly string[] {
+  return settings.judges ?? [settings.host];
+}
 
 // A new listing's settings: as given, with the roster lock filled in when
 // the operator left it out.

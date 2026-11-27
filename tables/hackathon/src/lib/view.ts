@@ -11,6 +11,7 @@ import {
   SUBMISSIONS_PER_TEAM,
   signUpOpen,
 } from "./event";
+import { judgesFor } from "./settings";
 import type { Pin } from "./text";
 import { isUtc } from "./time";
 
@@ -47,6 +48,7 @@ export type TeamView = {
 export type HackathonView = {
   event: string;
   host: string;
+  judges: string[];
   phase: Phase;
   sign_up_open: boolean;
   starts_at: string;
@@ -107,7 +109,7 @@ function next(s: State, reader: string, at: string): Next {
   const t = id === undefined ? undefined : s.teams.get(id);
   if (now >= Date.parse(s.deadline))
     return t ? { do: "wait_for_judging" } : { do: "nothing" };
-  if (reader === s.settings.host)
+  if (reader === s.settings.host || judgesFor(s.settings).includes(reader))
     return { do: "wait_for_deadline", until: s.deadline };
   const closes = s.settings.registration_closes;
   const open = signUpOpen(s, at);
@@ -191,6 +193,7 @@ export function view(
   const out: HackathonView = {
     event: s.settings.event,
     host: s.settings.host,
+    judges: [...judgesFor(s.settings)],
     phase: phase(s, at),
     sign_up_open: signUpOpen(s, at),
     starts_at: s.settings.starts_at,

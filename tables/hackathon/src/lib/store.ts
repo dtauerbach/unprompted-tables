@@ -23,6 +23,7 @@ const STATUS: Partial<Record<Code, number>> = {
   invalid: 400,
   not_host: 403,
   host: 403,
+  judge: 403,
   not_captain: 403,
 };
 
@@ -156,6 +157,7 @@ export type Summary = Pick<
   HackathonView,
   | "event"
   | "host"
+  | "judges"
   | "phase"
   | "sign_up_open"
   | "starts_at"
@@ -179,6 +181,7 @@ export async function listHackathons(): Promise<Summary[]> {
     out.push({
       event: v.event,
       host: v.host,
+      judges: v.judges,
       phase: v.phase,
       sign_up_open: v.sign_up_open,
       starts_at: v.starts_at,

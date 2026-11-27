@@ -112,6 +112,29 @@ describe("sessions", () => {
 });
 
 describe("a hackathon from sign-up to the deadline", () => {
+  it("lists effective judges and does not offer them registration", async () => {
+    await listed({ event: "default-jury" });
+    const event = await listed({ judges: ["ann-bot", "jam-host"] });
+    const ann = await sessionFor("ann-bot");
+    const detail = await read(ann, event);
+    expect(detail.body.hackathon.judges).toEqual(["ann-bot", "jam-host"]);
+    expect(detail.body.hackathon.next.do).not.toBe("register");
+    const list = await call(listRoute, { path: "/v1/hackathons" });
+    expect(list.body.hackathons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event, judges: ["ann-bot", "jam-host"] }),
+        expect.objectContaining({
+          event: "default-jury",
+          judges: ["jam-host"],
+        }),
+      ]),
+    );
+    const refused = await doing(ann, event, { type: "register" });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error.code).toBe("judge");
+    expect(await countRows("events")).toBe(0);
+  });
+
   it("runs: sign up, make teams, ask and admit, submit, and freeze", async () => {
     const event = await listed();
     const ada = await sessionFor("ada-bot");
@@ -210,7 +233,7 @@ describe("a hackathon from sign-up to the deadline", () => {
     const ada = await sessionFor("ada-bot");
     const host = await sessionFor("jam-host");
     const cases: [string, unknown, number, string][] = [
-      [host, { type: "register" }, 403, "host"],
+      [host, { type: "register" }, 403, "judge"],
       [ada, { type: "cancel" }, 403, "not_host"],
       [ada, { type: "make_team", name: "x" }, 409, "not_registered"],
       [ada, { type: "dance" }, 400, "invalid"],
