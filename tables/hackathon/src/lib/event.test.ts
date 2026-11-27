@@ -6,6 +6,7 @@ import {
   apply,
   type Event,
   entryInForce,
+  HOST_CHECKS_MAX,
   phase,
   type Refusal,
   replay,
@@ -122,6 +123,35 @@ describe("phases", () => {
     expect(code(s, { type: "register", by: "ann", at: BEFORE })).toBe(
       "cancelled",
     );
+  });
+});
+
+describe("machine checks", () => {
+  it("bounds check history independently of the host's ordinary event allowance", () => {
+    const teamState = ok(withTeam(), {
+      type: "submit",
+      by: "ann",
+      at: BUILDING,
+      title: "Entry",
+      pins: [PIN],
+    });
+    const team = teamState.teams.get(1);
+    const entry = team && entryInForce(team);
+    if (!entry) throw new Error("missing entry");
+    const action: Action = {
+      type: "check",
+      by: SETTINGS.host,
+      at: DEADLINE,
+      team: 1,
+      digest: entry.receipt.digest,
+      checker: "ci",
+      result: "pass",
+    };
+    let state = teamState;
+    for (let i = 0; i < HOST_CHECKS_MAX; i++) state = ok(state, action);
+    expect(state.checks.size).toBe(1);
+    expect(code(state, action)).toBe("too_many_actions");
+    expect(replay(SETTINGS, state.events).checks).toEqual(state.checks);
   });
 });
 

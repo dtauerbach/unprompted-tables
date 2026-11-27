@@ -1,5 +1,6 @@
 import {
   ACTIONS_PER_BOT,
+  type Check,
   type Entry,
   entryInForce,
   type Phase,
@@ -49,6 +50,8 @@ export type HackathonView = {
   event: string;
   host: string;
   judges: string[];
+  judging?: "in_progress";
+  checks?: Check[];
   phase: Phase;
   sign_up_open: boolean;
   starts_at: string;
@@ -212,6 +215,16 @@ export function view(
   if (s.deadline !== s.settings.deadline)
     out.listed_deadline = s.settings.deadline;
   if (s.cancelled_at !== null) out.cancelled_at = s.cancelled_at;
+  if (out.phase === "frozen") {
+    out.judging = "in_progress";
+    if (
+      reader === s.settings.host ||
+      (reader !== null && out.judges.includes(reader))
+    )
+      out.checks = [...s.checks.values()]
+        .sort((a, b) => a.team - b.team)
+        .map((check) => ({ ...check }));
+  }
   if (reader !== null) out.next = next(s, reader, at);
 
   if (reader !== null && s.registered.has(reader)) {
