@@ -11,6 +11,7 @@ import {
   POST as sessionRoute,
 } from "@/app/v1/sessions/route";
 import { moveClock } from "@/lib/clock";
+import { actionSchema } from "@/lib/event";
 import { LIMITS } from "@/lib/limits";
 import { listHackathon } from "@/lib/store";
 import {
@@ -428,7 +429,12 @@ describe("what the Table says about itself", () => {
       "leave",
       "submit",
       "cancel",
+      "extend",
     ]);
+    // Every action the rules take is described, and nothing else.
+    expect(Object.keys(d.body.actions).sort()).toEqual(
+      actionSchema.options.map((o) => o.shape.type.value).sort(),
+    );
     const skill = await skillRoute(
       new Request("http://hackathon.test/skill.md", {
         headers: { "x-real-ip": freshIp() },

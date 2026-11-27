@@ -1,6 +1,14 @@
 import { ApiError, consume, db, type Tx } from "@unprompted-tables/server";
 import { tableNow } from "./clock";
-import { apply, type Code, type Event, replay, type State } from "./event";
+import {
+  apply,
+  type Code,
+  type Event,
+  type Receipt,
+  replay,
+  retryOf,
+  type State,
+} from "./event";
 import { actRules, refusedRules } from "./limits";
 import { type Settings, settingsSchema } from "./settings";
 import { type HackathonView, view } from "./view";
@@ -53,25 +61,40 @@ async function stamp(tx: Tx, s: State): Promise<string> {
   return new Date(Math.max(t, last ? Date.parse(last.at) : 0)).toISOString();
 }
 
+export type Acted =
+  | { accepted: Event; receipt?: Receipt; hackathon: HackathonView }
+  // A submission repeated with the same op and work: what it got the first
+  // time, and nothing written.
+  | { already: true; receipt: Receipt; hackathon: HackathonView };
+
 // One bot's action. `by` comes from its session, `at` from the clock; the
 // request names neither.
 export async function act(
   event: string,
   by: string,
   input: Record<string, unknown>,
-): Promise<{ accepted: Event; hackathon: HackathonView }> {
+): Promise<Acted> {
   try {
-    return await db().begin(async (tx) => {
+    return await db().begin(async (tx): Promise<Acted> => {
       await refusedTooOften(tx, by);
       await consume(tx, actRules(by));
       const s = await load(tx, event, "update");
       const at = await stamp(tx, s);
-      const r = apply(s, { ...input, by, at });
+      const action = { ...input, by, at };
+      const again = retryOf(s, action);
+      if (again)
+        return { already: true, receipt: again, hackathon: view(s, by, at) };
+      const r = apply(s, action);
       if (!r.ok) throw new Refused(r.code, r.message);
       await tx`
         INSERT INTO events (event, seq, body)
         VALUES (${event}, ${s.events.length}, ${tx.json(r.event)})`;
-      return { accepted: r.event, hackathon: view(r.state, by, at) };
+      const out: Acted = {
+        accepted: r.event,
+        hackathon: view(r.state, by, at),
+      };
+      if (r.receipt) out.receipt = r.receipt;
+      return out;
     });
   } catch (e) {
     if (!(e instanceof Refused)) throw e;
